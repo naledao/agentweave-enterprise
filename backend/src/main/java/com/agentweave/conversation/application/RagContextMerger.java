@@ -21,11 +21,18 @@ public class RagContextMerger {
     public RagPromptContext merge(
             List<VectorRagCitationResponse> vectorCitations,
             List<GraphPathResponse> graphPaths) {
+        return merge(null, vectorCitations, graphPaths);
+    }
+
+    public RagPromptContext merge(
+            String plannedRetrievalMode,
+            List<VectorRagCitationResponse> vectorCitations,
+            List<GraphPathResponse> graphPaths) {
         List<CitationEventResponse> citations = deduplicate(vectorCitations).stream()
                 .map(this::toCitation)
                 .toList();
         List<GraphPathResponse> deduplicatedGraphPaths = deduplicateGraphPaths(graphPaths);
-        String retrievalMode = retrievalMode(citations, deduplicatedGraphPaths);
+        String retrievalMode = retrievalMode(plannedRetrievalMode, citations, deduplicatedGraphPaths);
         return new RagPromptContext(
                 retrievalMode,
                 buildPromptContext(citations, deduplicatedGraphPaths),
@@ -153,7 +160,13 @@ public class RagContextMerger {
         return context.toString();
     }
 
-    private String retrievalMode(List<CitationEventResponse> citations, List<GraphPathResponse> graphPaths) {
+    private String retrievalMode(
+            String plannedRetrievalMode,
+            List<CitationEventResponse> citations,
+            List<GraphPathResponse> graphPaths) {
+        if (plannedRetrievalMode != null && !plannedRetrievalMode.isBlank()) {
+            return plannedRetrievalMode;
+        }
         boolean hasCitations = !citations.isEmpty();
         boolean hasGraphPaths = !graphPaths.isEmpty();
         if (hasCitations && hasGraphPaths) {
