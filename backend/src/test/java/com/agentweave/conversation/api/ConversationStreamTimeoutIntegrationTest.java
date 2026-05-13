@@ -26,6 +26,8 @@ import com.agentweave.conversation.domain.ModelCallLogEntity;
 import com.agentweave.conversation.domain.ModelCallStatus;
 import com.agentweave.conversation.repository.ConversationMessageRepository;
 import com.agentweave.conversation.repository.ModelCallLogRepository;
+import com.agentweave.graphrag.application.GraphRagRetrievalService;
+import com.agentweave.graphrag.dto.GraphRagRetrievalResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -33,6 +35,8 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -79,18 +83,29 @@ class ConversationStreamTimeoutIntegrationTest {
     @MockitoBean
     private ConversationAiClient conversationAiClient;
 
+    @MockitoBean
+    private VectorStore vectorStore;
+
+    @MockitoBean
+    private GraphRagRetrievalService graphRagRetrievalService;
+
     private String userToken;
 
     @BeforeEach
     void setUp() throws Exception {
         when(conversationAiClient.streamAnswer(any()))
                 .thenReturn(Flux.never());
+        when(vectorStore.similaritySearch(any(SearchRequest.class)))
+                .thenReturn(List.of());
+        when(graphRagRetrievalService.retrieve(any(), any()))
+                .thenReturn(GraphRagRetrievalResponse.empty());
 
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         PermissionEntity ticketTool = ensurePermission("tool:ticket:query", "Query tickets", PermissionType.TOOL);
+        PermissionEntity ragSearch = ensurePermission("knowledge:rag:search", "Search RAG knowledge base", PermissionType.API);
         RoleEntity role = new RoleEntity(UUID.randomUUID(), "TIMEOUT_CHAT_USER_" + suffix.toUpperCase(),
                 "Timeout Chat User", null);
-        role.replacePermissions(List.of(ticketTool));
+        role.replacePermissions(List.of(ticketTool, ragSearch));
         role = roleRepository.save(role);
 
         UserEntity user = new UserEntity(

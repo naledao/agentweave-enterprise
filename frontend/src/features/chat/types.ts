@@ -64,6 +64,10 @@ export interface SendMessageResponse {
   userMessageId: string
   assistantMessageId: string
   traceId: string
+  answer?: string
+  retrievalMode?: 'VECTOR_ONLY' | 'GRAPH_ONLY' | 'HYBRID'
+  citations?: Citation[]
+  graphPaths?: unknown[]
 }
 
 export interface CancelMessageResponse {
@@ -75,8 +79,10 @@ export interface CancelMessageResponse {
 
 export interface Citation {
   documentId?: string
+  documentName?: string
   chunkId?: string
   title: string
+  source?: string
   snippet: string
   score?: number
 }
@@ -139,7 +145,9 @@ export interface StreamToolCallFinishedEvent extends StreamBaseEvent {
 export interface StreamCitationEvent extends StreamBaseEvent {
   type: 'citation'
   documentId?: string
+  documentName?: string
   chunkId?: string
+  source?: string
   title: string
   snippet: string
   score?: number
@@ -167,8 +175,10 @@ export interface StreamErrorEvent extends StreamBaseEvent {
 interface LegacyCitation {
   id?: string
   documentId?: string
+  documentName?: string
   documentTitle?: string
   title: string
+  source?: string
   snippet: string
   score?: number
 }

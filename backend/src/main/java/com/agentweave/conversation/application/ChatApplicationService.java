@@ -7,6 +7,7 @@ import com.agentweave.shared.security.CurrentUser;
 import com.agentweave.shared.security.CurrentUserService;
 import com.agentweave.shared.tracing.CorrelationContext;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +20,8 @@ public class ChatApplicationService {
 
     private final ConversationService conversationService;
     private final ConversationAiClient conversationAiClient;
+    private final ConversationRagService conversationRagService;
+    private final MessageMetadataService messageMetadataService;
     private final ModelCallLogService modelCallLogService;
     private final CurrentUserService currentUserService;
     private final CorrelationContext correlationContext;
@@ -26,11 +29,15 @@ public class ChatApplicationService {
     public ChatApplicationService(
             ConversationService conversationService,
             ConversationAiClient conversationAiClient,
+            ConversationRagService conversationRagService,
+            MessageMetadataService messageMetadataService,
             ModelCallLogService modelCallLogService,
             CurrentUserService currentUserService,
             CorrelationContext correlationContext) {
         this.conversationService = conversationService;
         this.conversationAiClient = conversationAiClient;
+        this.conversationRagService = conversationRagService;
+        this.messageMetadataService = messageMetadataService;
         this.modelCallLogService = modelCallLogService;
         this.currentUserService = currentUserService;
         this.correlationContext = correlationContext;
@@ -48,9 +55,11 @@ public class ChatApplicationService {
         CurrentUser user = currentUserService.requireCurrentUser();
         try (CorrelationContext.Scope ignored = correlationContext.open(
                 created.traceId(),
-                conversationId,
-                created.assistantMessageId())) {
-            ConversationPrompt prompt = conversationService.buildPrompt(conversationId, user.id());
+                        conversationId,
+                        created.assistantMessageId())) {
+            ConversationPrompt basePrompt = conversationService.buildPrompt(conversationId, user.id());
+            RagPromptContext ragContext = conversationRagService.retrieve(basePrompt);
+            ConversationPrompt prompt = conversationService.withRagContext(basePrompt, ragContext);
             long startedAt = System.nanoTime();
             try {
                 ConversationAiResponse response = conversationAiClient.answer(prompt);
@@ -59,7 +68,8 @@ public class ChatApplicationService {
                         conversationId,
                         user.id(),
                         created.assistantMessageId(),
-                        response.content());
+                        response.content(),
+                        messageMetadataService.assistantRagMetadata(ragContext));
                 modelCallLogService.recordSuccess(
                         conversationId,
                         created.assistantMessageId(),
@@ -71,7 +81,10 @@ public class ChatApplicationService {
                         created.userMessageId(),
                         created.assistantMessageId(),
                         created.traceId(),
-                        response.content());
+                        response.content(),
+                        ragContext.retrievalMode(),
+                        ragContext.citations(),
+                        ragContext.graphPaths());
             } catch (RuntimeException ex) {
                 long latencyMs = elapsedMillis(startedAt);
                 conversationService.failAssistantMessage(

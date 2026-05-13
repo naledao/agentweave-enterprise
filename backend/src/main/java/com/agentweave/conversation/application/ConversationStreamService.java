@@ -30,6 +30,8 @@ public class ConversationStreamService {
 
     private final ConversationService conversationService;
     private final ConversationAiClient conversationAiClient;
+    private final ConversationRagService conversationRagService;
+    private final MessageMetadataService messageMetadataService;
     private final ModelCallLogService modelCallLogService;
     private final SseEventFactory sseEventFactory;
     private final StreamTaskRegistry streamTaskRegistry;
@@ -41,6 +43,8 @@ public class ConversationStreamService {
     public ConversationStreamService(
             ConversationService conversationService,
             ConversationAiClient conversationAiClient,
+            ConversationRagService conversationRagService,
+            MessageMetadataService messageMetadataService,
             ModelCallLogService modelCallLogService,
             SseEventFactory sseEventFactory,
             StreamTaskRegistry streamTaskRegistry,
@@ -50,6 +54,8 @@ public class ConversationStreamService {
             CorrelationContext correlationContext) {
         this.conversationService = conversationService;
         this.conversationAiClient = conversationAiClient;
+        this.conversationRagService = conversationRagService;
+        this.messageMetadataService = messageMetadataService;
         this.modelCallLogService = modelCallLogService;
         this.sseEventFactory = sseEventFactory;
         this.streamTaskRegistry = streamTaskRegistry;
@@ -65,7 +71,10 @@ public class ConversationStreamService {
         streamTaskRegistry.assertCanRegister(user.id());
         UUID assistantMessageId = conversationService.startPendingAssistantMessage(conversationId, user.id());
         StreamTask streamTask = streamTaskRegistry.register(user.id(), conversationId, assistantMessageId, traceId);
-        ConversationPrompt prompt = conversationService.buildPrompt(conversationId, user.id());
+        ConversationPrompt basePrompt = conversationService.buildPrompt(conversationId, user.id());
+        RagPromptContext ragContext = withCorrelation(traceId, conversationId, assistantMessageId, () ->
+                conversationRagService.retrieve(basePrompt));
+        ConversationPrompt prompt = conversationService.withRagContext(basePrompt, ragContext);
         long startedAt = System.nanoTime();
         AtomicReference<StringBuilder> answer = new AtomicReference<>(new StringBuilder());
         AtomicBoolean terminalMessageStateUpdated = new AtomicBoolean(false);
@@ -78,7 +87,14 @@ public class ConversationStreamService {
                                         UUID.randomUUID().toString(),
                                         "Planner",
                                         "SUCCEEDED",
-                                        traceId),
+                                traceId),
+                        traceId)));
+        Flux<ServerSentEvent<?>> citations = Flux.fromIterable(ragContext.citations())
+                .map(citation -> withCorrelation(traceId, conversationId, assistantMessageId, () ->
+                        sseEventFactory.citation(
+                                conversationId,
+                                assistantMessageId,
+                                citation,
                                 traceId)));
         Flux<String> answerStream = Flux.defer(() -> {
             CorrelationContext.Scope scope = correlationContext.open(traceId, conversationId, assistantMessageId);
@@ -103,7 +119,8 @@ public class ConversationStreamService {
                     conversationService.completePendingAssistantMessage(
                             conversationId,
                             user.id(),
-                            answer.get().toString()));
+                            answer.get().toString(),
+                            messageMetadataService.assistantRagMetadata(ragContext)));
             terminalMessageStateUpdated.set(true);
             withCorrelation(traceId, conversationId, completedMessageId, () -> {
                 modelCallLogService.recordSuccess(
@@ -128,7 +145,7 @@ public class ConversationStreamService {
                 streamTask.cancellationSignal(),
                 timeoutSignal);
         AtomicReference<StreamTermination> terminationRef = new AtomicReference<>();
-        Flux<ServerSentEvent<?>> stream = Flux.concat(prefix, deltas, done);
+        Flux<ServerSentEvent<?>> stream = Flux.concat(prefix, citations, deltas, done);
         return stream.takeUntilOther(cancellationSignal.doOnNext(termination ->
                         {
                             terminationRef.set(termination);

@@ -22,7 +22,8 @@ public class SpringAiConversationAiClient implements ConversationAiClient {
     private static final String SYSTEM_PROMPT = """
             你是 AgentWeave Enterprise 的企业级 AI Agent 助手。
             你需要用中文回答，优先给出可执行、可验证的工程化建议。
-            当前阶段尚未接入真实 RAG 和工具执行结果；如果问题需要知识库、日志或工具数据，请明确说明仍需后端工具链补齐。
+            你会收到受控的知识库引用上下文；回答必须优先基于这些资料和会话上下文。
+            如果知识库没有召回相关资料，或资料不足以确认结论，请明确说明当前资料无法确认。
             不要编造引用、工具结果、内部日志或不存在的数据。
             """;
     private static final String PROVIDER = "openai";
@@ -90,9 +91,20 @@ public class SpringAiConversationAiClient implements ConversationAiClient {
         return """
                 会话标题：%s
 
+                知识库上下文：
+                %s
+
+                回答约束：
+                - 优先基于知识库上下文回答。
+                - 引用资料只能来自上方列出的 documentId/chunkId，不要伪造来源。
+                - 如果没有相关引用或引用不足，请说明当前知识库资料不足。
+
                 用户消息：
                 %s
-                """.formatted(prompt.title(), prompt.latestUserMessage());
+                """.formatted(
+                prompt.title(),
+                prompt.ragContext().promptContext(),
+                prompt.latestUserMessage());
     }
 
     private String model(ChatResponseMetadata metadata) {

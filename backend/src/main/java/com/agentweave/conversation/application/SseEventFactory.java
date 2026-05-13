@@ -64,8 +64,10 @@ public class SseEventFactory {
             String traceId) {
         return ServerSentEvent.builder(base(conversationId, messageId, traceId, null)
                         .documentId(citation.documentId())
+                        .documentName(citation.documentName())
                         .chunkId(citation.chunkId())
                         .title(citation.title())
+                        .source(citation.source())
                         .snippet(citation.snippet())
                         .score(citation.score())
                         .build())
@@ -137,8 +139,10 @@ public class SseEventFactory {
         private Long latencyMs;
         private String resultSummary;
         private String documentId;
+        private String documentName;
         private String chunkId;
         private String title;
+        private String source;
         private String snippet;
         private Double score;
         private String workflowRunId;
@@ -211,6 +215,11 @@ public class SseEventFactory {
             return this;
         }
 
+        SseEventPayloadBuilder documentName(String documentName) {
+            this.documentName = documentName;
+            return this;
+        }
+
         SseEventPayloadBuilder chunkId(String chunkId) {
             this.chunkId = chunkId;
             return this;
@@ -218,6 +227,11 @@ public class SseEventFactory {
 
         SseEventPayloadBuilder title(String title) {
             this.title = title;
+            return this;
+        }
+
+        SseEventPayloadBuilder source(String source) {
+            this.source = source;
             return this;
         }
 
@@ -266,8 +280,10 @@ public class SseEventFactory {
                     latencyMs,
                     resultSummary,
                     documentId,
+                    documentName,
                     chunkId,
                     title,
+                    source,
                     snippet,
                     score,
                     workflowRunId,

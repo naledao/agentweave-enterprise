@@ -22,6 +22,7 @@ import com.agentweave.auth.repository.RoleRepository;
 import com.agentweave.auth.repository.UserRepository;
 import com.agentweave.conversation.application.ConversationAiClient;
 import com.agentweave.conversation.application.ConversationAiResponse;
+import com.agentweave.conversation.application.ConversationPrompt;
 import com.agentweave.conversation.domain.ModelCallLogEntity;
 import com.agentweave.conversation.domain.ModelCallStatus;
 import com.agentweave.conversation.domain.ConversationMessageEntity;
@@ -29,6 +30,8 @@ import com.agentweave.conversation.domain.MessageStatus;
 import com.agentweave.conversation.application.ConversationStreamService;
 import com.agentweave.conversation.repository.ConversationMessageRepository;
 import com.agentweave.conversation.repository.ModelCallLogRepository;
+import com.agentweave.graphrag.application.GraphRagRetrievalService;
+import com.agentweave.graphrag.dto.GraphRagRetrievalResponse;
 import com.agentweave.shared.security.AuthenticatedUser;
 import com.agentweave.shared.security.CurrentUser;
 import com.agentweave.shared.tracing.CorrelationContext;
@@ -45,6 +48,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -99,6 +105,12 @@ class ConversationControllerIntegrationTest {
     @MockitoBean
     private ConversationAiClient conversationAiClient;
 
+    @MockitoBean
+    private VectorStore vectorStore;
+
+    @MockitoBean
+    private GraphRagRetrievalService graphRagRetrievalService;
+
     private String userToken;
     private String otherUserToken;
     private UUID userId;
@@ -115,11 +127,16 @@ class ConversationControllerIntegrationTest {
                         "mimo-v2.5",
                         12,
                         8));
+        when(vectorStore.similaritySearch(any(SearchRequest.class)))
+                .thenReturn(List.of());
+        when(graphRagRetrievalService.retrieve(any(), any()))
+                .thenReturn(GraphRagRetrievalResponse.empty());
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         PermissionEntity ticketTool = ensurePermission("tool:ticket:query", "Query tickets", PermissionType.TOOL);
+        PermissionEntity ragSearch = ensurePermission("knowledge:rag:search", "Search RAG knowledge base", PermissionType.API);
 
         RoleEntity role = new RoleEntity(UUID.randomUUID(), "CHAT_USER_" + suffix.toUpperCase(), "Chat User", null);
-        role.replacePermissions(List.of(ticketTool));
+        role.replacePermissions(List.of(ticketTool, ragSearch));
         role = roleRepository.save(role);
 
         UserEntity user = new UserEntity(
@@ -247,14 +264,32 @@ class ConversationControllerIntegrationTest {
     void syncMessageReturnsAnswerAndPersistsAssistantMessageAndModelCallLog() throws Exception {
         UUID conversationId = createConversation(userToken, "同步问答会话");
         String traceId = "trace-sync-success";
+        String documentId = UUID.randomUUID().toString();
+        String chunkId = UUID.randomUUID().toString();
+        when(vectorStore.similaritySearch(any(SearchRequest.class)))
+                .thenReturn(List.of(Document.builder()
+                        .id(chunkId)
+                        .text("订单接口慢需要先检查 payment-api、连接池和 retry 配置。")
+                        .metadata(Map.of(
+                                "documentId", documentId,
+                                "documentName", "订单排障手册",
+                                "chunkId", chunkId,
+                                "source", "runbook",
+                                "businessDomain", "order",
+                                "documentType", "RUNBOOK",
+                                "permissionLevel", "INTERNAL"))
+                        .score(0.91)
+                        .build()));
         AtomicReference<String> modelTraceId = new AtomicReference<>();
         AtomicReference<String> modelConversationId = new AtomicReference<>();
         AtomicReference<String> modelMessageId = new AtomicReference<>();
+        AtomicReference<ConversationPrompt> modelPrompt = new AtomicReference<>();
         when(conversationAiClient.answer(any()))
                 .thenAnswer(invocation -> {
                     modelTraceId.set(MDC.get(TraceIdProvider.TRACE_ID_KEY));
                     modelConversationId.set(MDC.get(CorrelationContext.CONVERSATION_ID_KEY));
                     modelMessageId.set(MDC.get(CorrelationContext.MESSAGE_ID_KEY));
+                    modelPrompt.set(invocation.getArgument(0));
                     return new ConversationAiResponse(
                             "MiMo-V2.5 sync answer.",
                             "openai",
@@ -276,6 +311,13 @@ class ConversationControllerIntegrationTest {
                 .andExpect(jsonPath("$.userMessageId").isString())
                 .andExpect(jsonPath("$.assistantMessageId").isString())
                 .andExpect(jsonPath("$.answer").value("MiMo-V2.5 sync answer."))
+                .andExpect(jsonPath("$.retrievalMode").value("VECTOR_ONLY"))
+                .andExpect(jsonPath("$.citations[0].documentId").value(documentId))
+                .andExpect(jsonPath("$.citations[0].documentName").value("订单排障手册"))
+                .andExpect(jsonPath("$.citations[0].chunkId").value(chunkId))
+                .andExpect(jsonPath("$.citations[0].source").value("runbook"))
+                .andExpect(jsonPath("$.citations[0].snippet").value("订单接口慢需要先检查 payment-api、连接池和 retry 配置。"))
+                .andExpect(jsonPath("$.graphPaths").isArray())
                 .andExpect(jsonPath("$.traceId").value(traceId))
                 .andReturn();
 
@@ -286,6 +328,10 @@ class ConversationControllerIntegrationTest {
         assertThat(modelTraceId.get()).isEqualTo(traceId);
         assertThat(modelConversationId.get()).isEqualTo(conversationId.toString());
         assertThat(modelMessageId.get()).isEqualTo(assistantMessageId.toString());
+        assertThat(modelPrompt.get().ragContext().promptContext())
+                .contains(documentId)
+                .contains(chunkId)
+                .contains("订单接口慢需要先检查 payment-api、连接池和 retry 配置。");
 
         mockMvc.perform(get("/api/v1/conversations/{conversationId}", conversationId)
                         .header("Authorization", "Bearer " + userToken))
@@ -297,7 +343,11 @@ class ConversationControllerIntegrationTest {
                 .andExpect(jsonPath("$.messages[1].role").value("ASSISTANT"))
                 .andExpect(jsonPath("$.messages[1].id").value(assistantMessageId.toString()))
                 .andExpect(jsonPath("$.messages[1].content").value("MiMo-V2.5 sync answer."))
-                .andExpect(jsonPath("$.messages[1].status").value("SUCCEEDED"));
+                .andExpect(jsonPath("$.messages[1].status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.messages[1].citations[0].documentId").value(documentId))
+                .andExpect(jsonPath("$.messages[1].citations[0].chunkId").value(chunkId))
+                .andExpect(jsonPath("$.messages[1].metadata", containsString("\"retrievalMode\":\"VECTOR_ONLY\"")))
+                .andExpect(jsonPath("$.messages[1].metadata", containsString(documentId)));
 
         ModelCallLogEntity log = modelCallLogRepository
                 .findFirstByConversationIdOrderByCreatedAtDesc(conversationId)
@@ -317,7 +367,8 @@ class ConversationControllerIntegrationTest {
         assertThat(assistantMessage.getStatus()).isEqualTo(MessageStatus.SUCCEEDED);
         assertThat(assistantMessage.getErrorCode()).isNull();
         assertThat(assistantMessage.getErrorMessage()).isNull();
-        assertThat(assistantMessage.getMetadata()).isEqualTo("{}");
+        assertThat(assistantMessage.getMetadata()).contains(documentId);
+        assertThat(assistantMessage.getMetadata()).contains(chunkId);
     }
 
     @Test
@@ -568,18 +619,36 @@ class ConversationControllerIntegrationTest {
     @Test
     void streamReturnsSseEventsAndPersistsAssistantMessage() throws Exception {
         String traceId = "trace-stream-success";
+        String documentId = UUID.randomUUID().toString();
+        String chunkId = UUID.randomUUID().toString();
+        when(vectorStore.similaritySearch(any(SearchRequest.class)))
+                .thenReturn(List.of(Document.builder()
+                        .id(chunkId)
+                        .text("API timeout: inspect upstream latency and database slow queries first.")
+                        .metadata(Map.of(
+                                "documentId", documentId,
+                                "documentName", "api-status-runbook",
+                                "chunkId", chunkId,
+                                "source", "runbook",
+                                "businessDomain", "ops",
+                                "documentType", "RUNBOOK",
+                                "permissionLevel", "INTERNAL"))
+                        .score(0.88)
+                        .build()));
         AtomicReference<String> modelTraceId = new AtomicReference<>();
         AtomicReference<String> modelConversationId = new AtomicReference<>();
         AtomicReference<String> modelMessageId = new AtomicReference<>();
+        AtomicReference<ConversationPrompt> modelPrompt = new AtomicReference<>();
         when(conversationAiClient.streamAnswer(any()))
                 .thenAnswer(invocation -> Flux.defer(() -> {
                     modelTraceId.set(MDC.get(TraceIdProvider.TRACE_ID_KEY));
                     modelConversationId.set(MDC.get(CorrelationContext.CONVERSATION_ID_KEY));
                     modelMessageId.set(MDC.get(CorrelationContext.MESSAGE_ID_KEY));
+                    modelPrompt.set(invocation.getArgument(0));
                     return Flux.just("MiMo-V2.5 test answer.");
                 }));
-        UUID conversationId = createConversation(userToken, "SSE 会话");
-        sendMessage(userToken, conversationId, "帮我分析接口超时");
+        UUID conversationId = createConversation(userToken, "SSE session");
+        sendMessage(userToken, conversationId, "Analyze API timeout");
 
         MvcResult streamResult = mockMvc.perform(get("/api/v1/conversations/{conversationId}/stream", conversationId)
                         .header("Authorization", "Bearer " + userToken)
@@ -598,6 +667,11 @@ class ConversationControllerIntegrationTest {
                 .andExpect(content().string(containsString("\"messageId\"")))
                 .andExpect(content().string(containsString("\"traceId\":\"" + traceId + "\"")))
                 .andExpect(content().string(containsString("\"timestamp\"")))
+                .andExpect(content().string(containsString("event:citation")))
+                .andExpect(content().string(containsString("\"documentId\":\"" + documentId + "\"")))
+                .andExpect(content().string(containsString("\"documentName\":\"api-status-runbook\"")))
+                .andExpect(content().string(containsString("\"chunkId\":\"" + chunkId + "\"")))
+                .andExpect(content().string(containsString("\"source\":\"runbook\"")))
                 .andExpect(content().string(containsString("event:message_delta")))
                 .andExpect(content().string(containsString("\"delta\":\"MiMo-V2.5 test answer.\"")))
                 .andExpect(content().string(containsString("MiMo-V2.5 test answer.")))
@@ -612,7 +686,10 @@ class ConversationControllerIntegrationTest {
                 .andExpect(jsonPath("$.messages[0].status").value("SUCCEEDED"))
                 .andExpect(jsonPath("$.messages[1].role").value("ASSISTANT"))
                 .andExpect(jsonPath("$.messages[1].content").value("MiMo-V2.5 test answer."))
-                .andExpect(jsonPath("$.messages[1].status").value("SUCCEEDED"));
+                .andExpect(jsonPath("$.messages[1].status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.messages[1].citations[0].documentId").value(documentId))
+                .andExpect(jsonPath("$.messages[1].citations[0].chunkId").value(chunkId))
+                .andExpect(jsonPath("$.messages[1].metadata", containsString(documentId)));
 
         ModelCallLogEntity log = modelCallLogRepository
                 .findFirstByConversationIdOrderByCreatedAtDesc(conversationId)
@@ -625,6 +702,9 @@ class ConversationControllerIntegrationTest {
         assertThat(modelTraceId.get()).isEqualTo(traceId);
         assertThat(modelConversationId.get()).isEqualTo(conversationId.toString());
         assertThat(modelMessageId.get()).isNotBlank();
+        assertThat(modelPrompt.get().ragContext().promptContext())
+                .contains(documentId)
+                .contains(chunkId);
     }
 
     @Test
@@ -827,7 +907,7 @@ class ConversationControllerIntegrationTest {
                 username,
                 "Chat User",
                 Set.of("CHAT_USER"),
-                Set.of("tool:ticket:query"));
+                Set.of("tool:ticket:query", "knowledge:rag:search"));
         AuthenticatedUser principal = new AuthenticatedUser(
                 currentUser,
                 "password",

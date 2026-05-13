@@ -105,6 +105,14 @@ public class ConversationMessageEntity {
         this.status = MessageStatus.CANCELLED;
     }
 
+    public void replaceMetadata(String metadata) {
+        if (metadata == null || metadata.isBlank()) {
+            this.metadata = "{}";
+            return;
+        }
+        this.metadata = metadata;
+    }
+
     public UUID getId() {
         return id;
     }

@@ -66,9 +66,29 @@ public class MessageService {
         return assistantMessage.getId();
     }
 
+    public UUID completeAssistantMessage(
+            ConversationEntity conversation,
+            UUID assistantMessageId,
+            String content,
+            String metadata) {
+        ConversationMessageEntity assistantMessage = findAssistantMessage(conversation, assistantMessageId);
+        assistantMessage.complete(content);
+        assistantMessage.replaceMetadata(metadata);
+        appendConversationSummary(conversation, assistantMessage);
+        return assistantMessage.getId();
+    }
+
     public UUID completeLatestAssistantMessage(ConversationEntity conversation, String content) {
         ConversationMessageEntity assistantMessage = findPendingOrStreamingAssistantMessage(conversation);
         assistantMessage.complete(content);
+        appendConversationSummary(conversation, assistantMessage);
+        return assistantMessage.getId();
+    }
+
+    public UUID completeLatestAssistantMessage(ConversationEntity conversation, String content, String metadata) {
+        ConversationMessageEntity assistantMessage = findPendingOrStreamingAssistantMessage(conversation);
+        assistantMessage.complete(content);
+        assistantMessage.replaceMetadata(metadata);
         appendConversationSummary(conversation, assistantMessage);
         return assistantMessage.getId();
     }

@@ -151,6 +151,16 @@ public class ConversationService {
     }
 
     @Transactional
+    public UUID completePendingAssistantMessage(
+            UUID conversationId,
+            UUID ownerUserId,
+            String content,
+            String metadata) {
+        ConversationEntity conversation = findOwnedConversation(conversationId, ownerUserId);
+        return messageService.completeLatestAssistantMessage(conversation, content, metadata);
+    }
+
+    @Transactional
     public UUID startPendingAssistantMessage(UUID conversationId, UUID ownerUserId) {
         ConversationEntity conversation = findOwnedConversation(conversationId, ownerUserId);
         return messageService.markLatestAssistantStreaming(conversation);
@@ -164,6 +174,17 @@ public class ConversationService {
             String content) {
         ConversationEntity conversation = findOwnedConversation(conversationId, ownerUserId);
         messageService.completeAssistantMessage(conversation, assistantMessageId, content);
+    }
+
+    @Transactional
+    public void completeAssistantMessage(
+            UUID conversationId,
+            UUID ownerUserId,
+            UUID assistantMessageId,
+            String content,
+            String metadata) {
+        ConversationEntity conversation = findOwnedConversation(conversationId, ownerUserId);
+        messageService.completeAssistantMessage(conversation, assistantMessageId, content, metadata);
     }
 
     @Transactional
@@ -244,6 +265,15 @@ public class ConversationService {
                 .map(ConversationMessageEntity::getContent)
                 .orElse("");
         return new ConversationPrompt(conversation.getId(), conversation.getTitle(), latestUserMessage, turns);
+    }
+
+    public ConversationPrompt withRagContext(ConversationPrompt prompt, RagPromptContext ragContext) {
+        return new ConversationPrompt(
+                prompt.conversationId(),
+                prompt.title(),
+                prompt.latestUserMessage(),
+                prompt.turns(),
+                ragContext);
     }
 
     private ConversationEntity findOwnedConversation(UUID conversationId, CurrentUser user) {
