@@ -2,6 +2,7 @@ package com.agentweave.knowledge.messaging.consumer;
 
 import com.agentweave.knowledge.application.DocumentIndexingService;
 import com.agentweave.knowledge.application.DocumentVectorIndexingResult;
+import com.agentweave.knowledge.messaging.application.DocumentMessageFailureService;
 import com.agentweave.knowledge.messaging.application.DocumentMessageIdempotencyService;
 import com.agentweave.knowledge.messaging.event.DocumentProcessingEvent;
 import com.agentweave.knowledge.messaging.publisher.DocumentVectorIndexedEventPublisher;
@@ -21,14 +22,17 @@ public class DocumentVectorIndexConsumer {
 
     private final DocumentIndexingService documentIndexingService;
     private final DocumentMessageIdempotencyService idempotencyService;
+    private final DocumentMessageFailureService failureService;
     private final DocumentVectorIndexedEventPublisher documentVectorIndexedEventPublisher;
 
     public DocumentVectorIndexConsumer(
             DocumentIndexingService documentIndexingService,
             DocumentMessageIdempotencyService idempotencyService,
+            DocumentMessageFailureService failureService,
             DocumentVectorIndexedEventPublisher documentVectorIndexedEventPublisher) {
         this.documentIndexingService = documentIndexingService;
         this.idempotencyService = idempotencyService;
+        this.failureService = failureService;
         this.documentVectorIndexedEventPublisher = documentVectorIndexedEventPublisher;
     }
 
@@ -49,10 +53,18 @@ public class DocumentVectorIndexConsumer {
                 event.documentId(),
                 event.traceId(),
                 event.triggeredBy());
-        DocumentVectorIndexingResult result = documentIndexingService.indexChunkedDocument(
-                event.documentId(),
-                event.traceId());
-        documentVectorIndexedEventPublisher.publish(result.document(), event.traceId());
-        idempotencyService.markProcessed(event, CONSUMER_NAME);
+        try {
+            DocumentVectorIndexingResult result = isReindex(event)
+                    ? documentIndexingService.indexRebuiltDocument(event.documentId(), event.traceId())
+                    : documentIndexingService.indexChunkedDocument(event.documentId(), event.traceId());
+            documentVectorIndexedEventPublisher.publish(result.document(), event.traceId(), event.triggeredBy());
+            idempotencyService.markProcessed(event, CONSUMER_NAME);
+        } catch (RuntimeException ex) {
+            throw failureService.handleConsumerFailure(event, CONSUMER_NAME, ex);
+        }
+    }
+
+    private boolean isReindex(DocumentProcessingEvent event) {
+        return event.metadata() != null && "reindex".equals(event.metadata().get("operation"));
     }
 }

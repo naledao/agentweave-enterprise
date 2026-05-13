@@ -2,6 +2,7 @@ package com.agentweave.knowledge.messaging.consumer;
 
 import com.agentweave.knowledge.application.DocumentApplicationService;
 import com.agentweave.knowledge.domain.DocumentEntity;
+import com.agentweave.knowledge.messaging.application.DocumentMessageFailureService;
 import com.agentweave.knowledge.messaging.application.DocumentMessageIdempotencyService;
 import com.agentweave.knowledge.messaging.event.DocumentProcessingEvent;
 import com.agentweave.knowledge.messaging.publisher.DocumentParsedEventPublisher;
@@ -21,14 +22,17 @@ public class DocumentParseConsumer {
 
     private final DocumentApplicationService documentApplicationService;
     private final DocumentMessageIdempotencyService idempotencyService;
+    private final DocumentMessageFailureService failureService;
     private final DocumentParsedEventPublisher documentParsedEventPublisher;
 
     public DocumentParseConsumer(
             DocumentApplicationService documentApplicationService,
             DocumentMessageIdempotencyService idempotencyService,
+            DocumentMessageFailureService failureService,
             DocumentParsedEventPublisher documentParsedEventPublisher) {
         this.documentApplicationService = documentApplicationService;
         this.idempotencyService = idempotencyService;
+        this.failureService = failureService;
         this.documentParsedEventPublisher = documentParsedEventPublisher;
     }
 
@@ -49,10 +53,14 @@ public class DocumentParseConsumer {
                 event.documentId(),
                 event.traceId(),
                 event.triggeredBy());
-        DocumentEntity cleanedDocument = documentApplicationService.parseUploadedDocument(
-                event.documentId(),
-                event.traceId());
-        documentParsedEventPublisher.publish(cleanedDocument, event.traceId());
-        idempotencyService.markProcessed(event, CONSUMER_NAME);
+        try {
+            DocumentEntity cleanedDocument = documentApplicationService.parseUploadedDocument(
+                    event.documentId(),
+                    event.traceId());
+            documentParsedEventPublisher.publish(cleanedDocument, event.traceId());
+            idempotencyService.markProcessed(event, CONSUMER_NAME);
+        } catch (RuntimeException ex) {
+            throw failureService.handleConsumerFailure(event, CONSUMER_NAME, ex);
+        }
     }
 }

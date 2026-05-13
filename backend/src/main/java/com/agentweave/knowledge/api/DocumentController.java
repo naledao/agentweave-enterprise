@@ -99,6 +99,7 @@ public class DocumentController {
     }
 
     @PostMapping("/{documentId}/reindex")
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @PreAuthorize("hasAuthority('knowledge:document:index') or hasAuthority('ROLE_ADMIN')")
     public DocumentResponse reindex(@PathVariable UUID documentId) {
         return documentIndexingService.reindexDocument(documentId);

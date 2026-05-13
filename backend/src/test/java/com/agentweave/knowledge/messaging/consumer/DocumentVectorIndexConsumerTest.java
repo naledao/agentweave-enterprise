@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.agentweave.knowledge.application.DocumentIndexingService;
 import com.agentweave.knowledge.application.DocumentVectorIndexingResult;
 import com.agentweave.knowledge.domain.DocumentEntity;
+import com.agentweave.knowledge.messaging.application.DocumentMessageFailureService;
 import com.agentweave.knowledge.messaging.application.DocumentMessageIdempotencyService;
 import com.agentweave.knowledge.messaging.event.DocumentProcessingEvent;
 import com.agentweave.knowledge.messaging.event.DocumentProcessingEventType;
@@ -23,11 +24,14 @@ class DocumentVectorIndexConsumerTest {
             org.mockito.Mockito.mock(DocumentIndexingService.class);
     private final DocumentMessageIdempotencyService idempotencyService =
             org.mockito.Mockito.mock(DocumentMessageIdempotencyService.class);
+    private final DocumentMessageFailureService failureService =
+            org.mockito.Mockito.mock(DocumentMessageFailureService.class);
     private final DocumentVectorIndexedEventPublisher documentVectorIndexedEventPublisher =
             org.mockito.Mockito.mock(DocumentVectorIndexedEventPublisher.class);
     private final DocumentVectorIndexConsumer consumer = new DocumentVectorIndexConsumer(
             documentIndexingService,
             idempotencyService,
+            failureService,
             documentVectorIndexedEventPublisher);
 
     private DocumentProcessingEvent event;
@@ -71,7 +75,28 @@ class DocumentVectorIndexConsumerTest {
         consumer.handle(event);
 
         verify(documentIndexingService).indexChunkedDocument(event.documentId(), event.traceId());
-        verify(documentVectorIndexedEventPublisher).publish(document, event.traceId());
+        verify(documentVectorIndexedEventPublisher).publish(document, event.traceId(), event.triggeredBy());
+        verify(idempotencyService).markProcessed(event, DocumentVectorIndexConsumer.CONSUMER_NAME);
+    }
+
+    @Test
+    void indexesRebuiltDocumentWhenChunkedEventComesFromReindex() {
+        event = DocumentProcessingEvent.create(
+                DocumentProcessingEventType.DOCUMENT_CHUNKED,
+                event.documentId(),
+                event.traceId(),
+                event.triggeredBy(),
+                Map.of("operation", "reindex"));
+        DocumentVectorIndexingResult result = new DocumentVectorIndexingResult(document, 2);
+        when(idempotencyService.isProcessed(event)).thenReturn(false);
+        when(documentIndexingService.indexRebuiltDocument(event.documentId(), event.traceId()))
+                .thenReturn(result);
+
+        consumer.handle(event);
+
+        verify(documentIndexingService).indexRebuiltDocument(event.documentId(), event.traceId());
+        verify(documentIndexingService, never()).indexChunkedDocument(event.documentId(), event.traceId());
+        verify(documentVectorIndexedEventPublisher).publish(document, event.traceId(), event.triggeredBy());
         verify(idempotencyService).markProcessed(event, DocumentVectorIndexConsumer.CONSUMER_NAME);
     }
 
@@ -82,7 +107,7 @@ class DocumentVectorIndexConsumerTest {
         consumer.handle(event);
 
         verify(documentIndexingService, never()).indexChunkedDocument(event.documentId(), event.traceId());
-        verify(documentVectorIndexedEventPublisher, never()).publish(document, event.traceId());
+        verify(documentVectorIndexedEventPublisher, never()).publish(document, event.traceId(), event.triggeredBy());
         verify(idempotencyService, never()).markProcessed(event, DocumentVectorIndexConsumer.CONSUMER_NAME);
     }
 
@@ -92,14 +117,18 @@ class DocumentVectorIndexConsumerTest {
         when(idempotencyService.isProcessed(event)).thenReturn(false);
         when(documentIndexingService.indexChunkedDocument(event.documentId(), event.traceId()))
                 .thenReturn(result);
-        doThrow(new IllegalStateException("rabbitmq unavailable"))
+        IllegalStateException exception = new IllegalStateException("rabbitmq unavailable");
+        doThrow(exception)
                 .when(documentVectorIndexedEventPublisher)
-                .publish(document, event.traceId());
+                .publish(document, event.traceId(), event.triggeredBy());
+        when(failureService.handleConsumerFailure(event, DocumentVectorIndexConsumer.CONSUMER_NAME, exception))
+                .thenReturn(exception);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> consumer.handle(event))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("rabbitmq unavailable");
 
+        verify(failureService).handleConsumerFailure(event, DocumentVectorIndexConsumer.CONSUMER_NAME, exception);
         verify(idempotencyService, never()).markProcessed(event, DocumentVectorIndexConsumer.CONSUMER_NAME);
     }
 }

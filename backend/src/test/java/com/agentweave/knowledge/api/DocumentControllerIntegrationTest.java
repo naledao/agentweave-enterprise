@@ -35,6 +35,7 @@ import com.agentweave.knowledge.domain.DocumentChunkEntity;
 import com.agentweave.knowledge.domain.DocumentChunkStatus;
 import com.agentweave.knowledge.domain.DocumentEntity;
 import com.agentweave.knowledge.domain.DocumentStatus;
+import com.agentweave.knowledge.messaging.publisher.DocumentReindexRequestedEventPublisher;
 import com.agentweave.knowledge.repository.DocumentChunkRepository;
 import com.agentweave.knowledge.repository.DocumentRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -101,6 +102,9 @@ class DocumentControllerIntegrationTest {
 
     @MockitoBean
     private GraphRagIndexingScheduler graphRagIndexingScheduler;
+
+    @MockitoBean
+    private DocumentReindexRequestedEventPublisher documentReindexRequestedEventPublisher;
 
     private String uploadToken;
     private String noPermissionToken;
@@ -634,7 +638,7 @@ class DocumentControllerIntegrationTest {
     }
 
     @Test
-    void reindexDocumentReplacesChunksCleansOldIndexesAndMarksIndexed() throws Exception {
+    void reindexDocumentPublishesAsyncTaskAndKeepsCurrentState() throws Exception {
         String initialTraceId = "trace-document-reindex-initial";
         String reindexTraceId = "trace-document-reindex-success";
         MvcResult result = mockMvc.perform(multipart("/api/v1/documents")
@@ -670,37 +674,31 @@ class DocumentControllerIntegrationTest {
         mockMvc.perform(post("/api/v1/documents/{documentId}/reindex", documentId)
                         .header("Authorization", "Bearer " + uploadToken)
                         .header("X-Trace-Id", reindexTraceId))
-                .andExpect(status().isOk())
+                .andExpect(status().isAccepted())
                 .andExpect(header().string("X-Trace-Id", reindexTraceId))
                 .andExpect(jsonPath("$.documentId").value(documentId.toString()))
                 .andExpect(jsonPath("$.status").value("indexed"))
-                .andExpect(jsonPath("$.traceId").value(reindexTraceId))
-                .andExpect(jsonPath("$.reindexCount").value(1))
-                .andExpect(jsonPath("$.chunkCount").value(1))
+                .andExpect(jsonPath("$.traceId").value(initialTraceId))
+                .andExpect(jsonPath("$.reindexCount").value(0))
+                .andExpect(jsonPath("$.chunkCount").value(2))
                 .andExpect(jsonPath("$.indexedAt").isString());
 
         DocumentEntity document = documentRepository.findById(documentId).orElseThrow();
-        List<DocumentChunkEntity> newChunks = documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId);
         assertThat(document.getStatus()).isEqualTo(DocumentStatus.INDEXED);
-        assertThat(document.getReindexCount()).isEqualTo(1);
-        assertThat(document.getTraceId()).isEqualTo(reindexTraceId);
-        assertThat(newChunks).hasSize(1);
-        assertThat(newChunks)
+        assertThat(document.getReindexCount()).isZero();
+        assertThat(document.getTraceId()).isEqualTo(initialTraceId);
+        assertThat(documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId))
                 .extracting(DocumentChunkEntity::getStatus)
                 .containsOnly(DocumentChunkStatus.INDEXED);
-        assertThat(newChunks)
+        assertThat(documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId))
                 .extracting(DocumentChunkEntity::getId)
-                .doesNotContainAnyElementsOf(oldChunkIds);
-        assertThat(newChunks.get(0).getMetadata())
-                .containsEntry("documentId", documentId.toString())
-                .containsEntry("chunkId", newChunks.get(0).getId().toString());
-        verify(graphRagIndexCleanupService).deleteByDocumentId(documentId, oldChunkIds, reindexTraceId);
-        verify(pgVectorIndexService).deleteByDocumentId(documentId);
-        verify(graphRagIndexingScheduler).enqueue(documentId, reindexTraceId);
+                .containsExactlyElementsOf(oldChunkIds);
+        verify(documentReindexRequestedEventPublisher)
+                .publish(any(DocumentEntity.class), eq(reindexTraceId), any(UUID.class));
     }
 
     @Test
-    void reindexDocumentRequiresParsedText() throws Exception {
+    void reindexDocumentCanQueueUnparsedDocumentForBackgroundValidation() throws Exception {
         MvcResult result = mockMvc.perform(multipart("/api/v1/documents")
                         .file(textFile("reindex-unparsed.txt", "hello, world!"))
                         .param("source", "runbook")
@@ -718,21 +716,23 @@ class DocumentControllerIntegrationTest {
 
         mockMvc.perform(post("/api/v1/documents/{documentId}/reindex", documentId)
                         .header("Authorization", "Bearer " + uploadToken))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("COMMON_400"))
-                .andExpect(jsonPath("$.message").value("document must be parsed before reindexing"));
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.documentId").value(documentId.toString()))
+                .andExpect(jsonPath("$.status").value("uploaded"));
 
         DocumentEntity document = documentRepository.findById(documentId).orElseThrow();
         assertThat(document.getStatus()).isEqualTo(DocumentStatus.UPLOADED);
         assertThat(document.getErrorMessage()).isNull();
         assertThat(document.getReindexCount()).isZero();
+        verify(documentReindexRequestedEventPublisher)
+                .publish(any(DocumentEntity.class), any(), any(UUID.class));
     }
 
     @Test
-    void reindexDocumentMarksFailedWhenVectorCleanupFails() throws Exception {
-        String traceId = "trace-document-reindex-cleanup-failure";
+    void reindexDocumentReturnsBusinessErrorWhenTaskPublishFails() throws Exception {
+        String traceId = "trace-document-reindex-publish-failure";
         MvcResult result = mockMvc.perform(multipart("/api/v1/documents")
-                        .file(textFile("reindex-cleanup-fail.txt", "hello, world!"))
+                        .file(textFile("reindex-publish-fail.txt", "hello, world!"))
                         .param("source", "runbook")
                         .param("businessDomain", "order")
                         .param("documentType", "RUNBOOK")
@@ -745,32 +745,22 @@ class DocumentControllerIntegrationTest {
                 .readTree(result.getResponse().getContentAsString())
                 .get("documentId")
                 .asText());
-        when(documentStorageService.read(eq("agentweave-documents"), any()))
-                .thenReturn(stream("searchable chunk"));
-        mockMvc.perform(post("/api/v1/documents/{documentId}/parse", documentId)
-                        .header("Authorization", "Bearer " + uploadToken))
-                .andExpect(status().isOk());
-        documentApplicationService.chunkDocument(documentId, "searchable chunk");
-        mockMvc.perform(post("/api/v1/documents/{documentId}/index", documentId)
-                        .header("Authorization", "Bearer " + uploadToken))
-                .andExpect(status().isOk());
-        doThrow(new IllegalStateException("vector cleanup unavailable"))
-                .when(pgVectorIndexService)
-                .deleteByDocumentId(documentId);
+        DocumentEntity document = documentRepository.findById(documentId).orElseThrow();
+        doThrow(new IllegalStateException("rabbitmq unavailable"))
+                .when(documentReindexRequestedEventPublisher)
+                .publish(any(DocumentEntity.class), eq(traceId), any(UUID.class));
 
         mockMvc.perform(post("/api/v1/documents/{documentId}/reindex", documentId)
                         .header("Authorization", "Bearer " + uploadToken)
                         .header("X-Trace-Id", traceId))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMON_001"))
-                .andExpect(jsonPath("$.message").value("vector cleanup unavailable"))
+                .andExpect(jsonPath("$.message").value("rabbitmq unavailable"))
                 .andExpect(jsonPath("$.traceId").value(traceId));
 
-        DocumentEntity document = documentRepository.findById(documentId).orElseThrow();
-        assertThat(document.getStatus()).isEqualTo(DocumentStatus.FAILED);
-        assertThat(document.getErrorMessage()).isEqualTo("vector cleanup unavailable");
-        assertThat(document.getTraceId()).isEqualTo(traceId);
-        assertThat(document.getReindexCount()).isZero();
+        DocumentEntity persistedDocument = documentRepository.findById(documentId).orElseThrow();
+        assertThat(persistedDocument.getStatus()).isEqualTo(DocumentStatus.UPLOADED);
+        assertThat(persistedDocument.getErrorMessage()).isNull();
     }
 
     @Test

@@ -5,8 +5,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.agentweave.knowledge.application.DocumentChunkPipelineService;
 import com.agentweave.knowledge.application.DocumentChunkingResult;
+import com.agentweave.knowledge.application.DocumentReindexPipelineService;
 import com.agentweave.knowledge.domain.DocumentEntity;
 import com.agentweave.knowledge.messaging.application.DocumentMessageFailureService;
 import com.agentweave.knowledge.messaging.application.DocumentMessageIdempotencyService;
@@ -18,18 +18,18 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class DocumentChunkConsumerTest {
+class DocumentReindexConsumerTest {
 
-    private final DocumentChunkPipelineService documentChunkPipelineService =
-            org.mockito.Mockito.mock(DocumentChunkPipelineService.class);
+    private final DocumentReindexPipelineService documentReindexPipelineService =
+            org.mockito.Mockito.mock(DocumentReindexPipelineService.class);
     private final DocumentMessageIdempotencyService idempotencyService =
             org.mockito.Mockito.mock(DocumentMessageIdempotencyService.class);
     private final DocumentMessageFailureService failureService =
             org.mockito.Mockito.mock(DocumentMessageFailureService.class);
     private final DocumentChunkedEventPublisher documentChunkedEventPublisher =
             org.mockito.Mockito.mock(DocumentChunkedEventPublisher.class);
-    private final DocumentChunkConsumer consumer = new DocumentChunkConsumer(
-            documentChunkPipelineService,
+    private final DocumentReindexConsumer consumer = new DocumentReindexConsumer(
+            documentReindexPipelineService,
             idempotencyService,
             failureService,
             documentChunkedEventPublisher);
@@ -42,11 +42,11 @@ class DocumentChunkConsumerTest {
         UUID documentId = UUID.randomUUID();
         UUID triggeredBy = UUID.randomUUID();
         event = DocumentProcessingEvent.create(
-                DocumentProcessingEventType.DOCUMENT_PARSED,
+                DocumentProcessingEventType.DOCUMENT_REINDEX_REQUESTED,
                 documentId,
-                "trace-chunk",
+                "trace-reindex",
                 triggeredBy,
-                Map.of("source", "runbook"));
+                Map.of("operation", "reindex"));
         document = new DocumentEntity(
                 documentId,
                 "runbook.txt",
@@ -66,17 +66,18 @@ class DocumentChunkConsumerTest {
     }
 
     @Test
-    void chunksDocumentPublishesChunkedEventAndMarksProcessed() {
+    void preparesReindexPublishesChunkedEventAndMarksProcessed() {
         DocumentChunkingResult result = new DocumentChunkingResult(document, 2);
         when(idempotencyService.isProcessed(event)).thenReturn(false);
-        when(documentChunkPipelineService.chunkParsedDocument(event.documentId(), event.traceId()))
+        when(documentReindexPipelineService.prepareReindex(event.documentId(), event.traceId()))
                 .thenReturn(result);
 
         consumer.handle(event);
 
-        verify(documentChunkPipelineService).chunkParsedDocument(event.documentId(), event.traceId());
-        verify(documentChunkedEventPublisher).publish(document, 2, event.traceId());
-        verify(idempotencyService).markProcessed(event, DocumentChunkConsumer.CONSUMER_NAME);
+        verify(documentReindexPipelineService).prepareReindex(event.documentId(), event.traceId());
+        verify(documentChunkedEventPublisher)
+                .publish(document, 2, event.traceId(), event.triggeredBy(), true);
+        verify(idempotencyService).markProcessed(event, DocumentReindexConsumer.CONSUMER_NAME);
     }
 
     @Test
@@ -85,29 +86,30 @@ class DocumentChunkConsumerTest {
 
         consumer.handle(event);
 
-        verify(documentChunkPipelineService, never()).chunkParsedDocument(event.documentId(), event.traceId());
-        verify(documentChunkedEventPublisher, never()).publish(document, 2, event.traceId());
-        verify(idempotencyService, never()).markProcessed(event, DocumentChunkConsumer.CONSUMER_NAME);
+        verify(documentReindexPipelineService, never()).prepareReindex(event.documentId(), event.traceId());
+        verify(documentChunkedEventPublisher, never())
+                .publish(document, 2, event.traceId(), event.triggeredBy(), true);
+        verify(idempotencyService, never()).markProcessed(event, DocumentReindexConsumer.CONSUMER_NAME);
     }
 
     @Test
     void doesNotMarkProcessedWhenNextEventPublishFails() {
         DocumentChunkingResult result = new DocumentChunkingResult(document, 2);
         when(idempotencyService.isProcessed(event)).thenReturn(false);
-        when(documentChunkPipelineService.chunkParsedDocument(event.documentId(), event.traceId()))
+        when(documentReindexPipelineService.prepareReindex(event.documentId(), event.traceId()))
                 .thenReturn(result);
         IllegalStateException exception = new IllegalStateException("rabbitmq unavailable");
         doThrow(exception)
                 .when(documentChunkedEventPublisher)
-                .publish(document, 2, event.traceId());
-        when(failureService.handleConsumerFailure(event, DocumentChunkConsumer.CONSUMER_NAME, exception))
+                .publish(document, 2, event.traceId(), event.triggeredBy(), true);
+        when(failureService.handleConsumerFailure(event, DocumentReindexConsumer.CONSUMER_NAME, exception))
                 .thenReturn(exception);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> consumer.handle(event))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("rabbitmq unavailable");
 
-        verify(failureService).handleConsumerFailure(event, DocumentChunkConsumer.CONSUMER_NAME, exception);
-        verify(idempotencyService, never()).markProcessed(event, DocumentChunkConsumer.CONSUMER_NAME);
+        verify(failureService).handleConsumerFailure(event, DocumentReindexConsumer.CONSUMER_NAME, exception);
+        verify(idempotencyService, never()).markProcessed(event, DocumentReindexConsumer.CONSUMER_NAME);
     }
 }

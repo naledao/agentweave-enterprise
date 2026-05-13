@@ -5,18 +5,20 @@ import com.agentweave.knowledge.domain.DocumentChunkStatus;
 import com.agentweave.knowledge.domain.DocumentEntity;
 import com.agentweave.knowledge.domain.DocumentStatus;
 import com.agentweave.knowledge.dto.DocumentResponse;
+import com.agentweave.knowledge.messaging.publisher.DocumentReindexRequestedEventPublisher;
 import com.agentweave.knowledge.repository.DocumentChunkRepository;
 import com.agentweave.knowledge.repository.DocumentRepository;
 import com.agentweave.shared.exception.BusinessException;
 import com.agentweave.shared.exception.ErrorCode;
 import com.agentweave.shared.exception.ResourceNotFoundException;
+import com.agentweave.shared.security.CurrentUser;
 import com.agentweave.shared.security.CurrentUserService;
 import com.agentweave.shared.tracing.TraceIdProvider;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -28,36 +30,30 @@ public class DocumentIndexingService {
 
     private final DocumentRepository documentRepository;
     private final DocumentChunkRepository documentChunkRepository;
-    private final DocumentMetadataFactory documentMetadataFactory;
-    private final DocumentChunkingService documentChunkingService;
     private final PgVectorIndexService pgVectorIndexService;
-    private final GraphRagIndexCleanupService graphRagIndexCleanupService;
     private final GraphRagIndexingScheduler graphRagIndexingScheduler;
     private final CurrentUserService currentUserService;
     private final TraceIdProvider traceIdProvider;
     private final TransactionTemplate transactionTemplate;
+    private final ObjectProvider<DocumentReindexRequestedEventPublisher> reindexRequestedEventPublisherProvider;
 
     public DocumentIndexingService(
             DocumentRepository documentRepository,
             DocumentChunkRepository documentChunkRepository,
-            DocumentMetadataFactory documentMetadataFactory,
-            DocumentChunkingService documentChunkingService,
             PgVectorIndexService pgVectorIndexService,
-            GraphRagIndexCleanupService graphRagIndexCleanupService,
             GraphRagIndexingScheduler graphRagIndexingScheduler,
             CurrentUserService currentUserService,
             TraceIdProvider traceIdProvider,
-            TransactionTemplate transactionTemplate) {
+            TransactionTemplate transactionTemplate,
+            ObjectProvider<DocumentReindexRequestedEventPublisher> reindexRequestedEventPublisherProvider) {
         this.documentRepository = documentRepository;
         this.documentChunkRepository = documentChunkRepository;
-        this.documentMetadataFactory = documentMetadataFactory;
-        this.documentChunkingService = documentChunkingService;
         this.pgVectorIndexService = pgVectorIndexService;
-        this.graphRagIndexCleanupService = graphRagIndexCleanupService;
         this.graphRagIndexingScheduler = graphRagIndexingScheduler;
         this.currentUserService = currentUserService;
         this.traceIdProvider = traceIdProvider;
         this.transactionTemplate = transactionTemplate;
+        this.reindexRequestedEventPublisherProvider = reindexRequestedEventPublisherProvider;
     }
 
     public DocumentResponse indexDocument(UUID documentId) {
@@ -76,6 +72,10 @@ public class DocumentIndexingService {
 
     public DocumentVectorIndexingResult indexChunkedDocument(UUID documentId, String traceId) {
         return indexChunkedDocument(documentId, traceId, false);
+    }
+
+    public DocumentVectorIndexingResult indexRebuiltDocument(UUID documentId, String traceId) {
+        return indexChunkedDocument(documentId, traceId, true);
     }
 
     private DocumentVectorIndexingResult indexChunkedDocument(UUID documentId, String traceId, boolean reindex) {
@@ -121,23 +121,30 @@ public class DocumentIndexingService {
     }
 
     public DocumentResponse reindexDocument(UUID documentId) {
-        currentUserService.requireCurrentUser();
+        CurrentUser user = currentUserService.requireCurrentUser();
         currentUserService.requirePermission(INDEX_PERMISSION);
         String traceId = traceIdProvider.currentTraceId();
+        DocumentEntity document = findDocument(documentId);
+        DocumentReindexRequestedEventPublisher publisher = reindexRequestedEventPublisherProvider.getIfAvailable();
+        if (publisher == null) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "document reindex queue is disabled");
+        }
 
         try {
-            resetIndexState(documentId, traceId);
-            return indexDocument(documentId, true);
+            publisher.publish(document, traceId, user.id());
+            log.info("Document reindex requested: documentId={}, traceId={}, triggeredBy={}",
+                    documentId,
+                    traceId,
+                    user.id());
+            long chunkCount = documentChunkRepository.countByDocumentId(documentId);
+            return DocumentResponse.from(document, chunkCount);
         } catch (RuntimeException ex) {
             String summary = errorSummary(ex);
-            log.warn("Document reindex failed: documentId={}, traceId={}, error={}",
+            log.warn("Document reindex request failed: documentId={}, traceId={}, error={}",
                     documentId,
                     traceId,
                     summary,
                     ex);
-            if (!isExpectedValidation(ex)) {
-                markFailed(documentId, List.of(), summary, traceId);
-            }
             if (ex instanceof BusinessException businessException) {
                 throw businessException;
             }
@@ -170,58 +177,6 @@ public class DocumentIndexingService {
         });
     }
 
-    private void resetIndexState(UUID documentId, String traceId) {
-        List<UUID> oldChunkIds = transactionTemplate.execute(status -> {
-            DocumentEntity document = findDocumentWithLock(documentId);
-            if (document.getStatus() == DocumentStatus.PARSING
-                    || document.getStatus() == DocumentStatus.CLEANING
-                    || document.getStatus() == DocumentStatus.CHUNKING
-                    || document.getStatus() == DocumentStatus.EMBEDDING) {
-                throw new BusinessException(
-                        ErrorCode.VALIDATION_FAILED,
-                        "document is already being processed");
-            }
-            String cleanedText = document.getCleanedText();
-            if (cleanedText == null || cleanedText.isBlank()) {
-                throw new BusinessException(
-                        ErrorCode.VALIDATION_FAILED,
-                        "document must be parsed before reindexing");
-            }
-            document.markChunking(traceId);
-            documentRepository.saveAndFlush(document);
-            return documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId).stream()
-                    .map(DocumentChunkEntity::getId)
-                    .toList();
-        });
-
-        try {
-            graphRagIndexCleanupService.deleteByDocumentId(documentId, oldChunkIds, traceId);
-            pgVectorIndexService.deleteByDocumentId(documentId);
-            transactionTemplate.executeWithoutResult(status -> {
-                DocumentEntity document = findDocumentWithLock(documentId);
-                List<String> chunkContents = documentChunkingService.split(document.getCleanedText());
-                documentChunkRepository.deleteByDocumentId(documentId);
-                List<DocumentChunkEntity> chunks = new ArrayList<>();
-                for (int index = 0; index < chunkContents.size(); index++) {
-                    UUID chunkId = UUID.randomUUID();
-                    DocumentMetadata metadata = documentMetadataFactory.forChunk(document, chunkId);
-                    chunks.add(new DocumentChunkEntity(
-                            chunkId,
-                            document.getId(),
-                            index,
-                            chunkContents.get(index).trim(),
-                            metadata.toMap()));
-                }
-                documentChunkRepository.saveAllAndFlush(chunks);
-                document.markEmbedding(traceId);
-                documentRepository.saveAndFlush(document);
-            });
-        } catch (RuntimeException ex) {
-            markFailed(documentId, List.of(), errorSummary(ex), traceId);
-            throw ex;
-        }
-    }
-
     private void markFailed(
             UUID documentId,
             List<DocumentChunkEntity> chunks,
@@ -251,12 +206,6 @@ public class DocumentIndexingService {
     private DocumentEntity findDocumentWithLock(UUID documentId) {
         return documentRepository.findWithLockById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("document not found"));
-    }
-
-    private boolean isExpectedValidation(RuntimeException ex) {
-        return ex instanceof BusinessException businessException
-                && (businessException.getErrorCode() == ErrorCode.VALIDATION_FAILED
-                || businessException instanceof ResourceNotFoundException);
     }
 
     private String errorSummary(Exception ex) {

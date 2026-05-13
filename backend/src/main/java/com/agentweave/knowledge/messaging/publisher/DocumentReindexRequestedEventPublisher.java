@@ -11,45 +11,31 @@ import org.springframework.stereotype.Component;
 
 @Component
 @ConditionalOnProperty(prefix = "agentweave.document-pipeline.rabbitmq", name = "enabled", havingValue = "true")
-public class DocumentChunkedEventPublisher {
+public class DocumentReindexRequestedEventPublisher {
 
     private final DocumentProcessingPublisher documentProcessingPublisher;
 
-    public DocumentChunkedEventPublisher(DocumentProcessingPublisher documentProcessingPublisher) {
+    public DocumentReindexRequestedEventPublisher(DocumentProcessingPublisher documentProcessingPublisher) {
         this.documentProcessingPublisher = documentProcessingPublisher;
     }
 
-    public void publish(DocumentEntity document, int chunkCount, String traceId) {
-        publish(document, chunkCount, traceId, document.getUploadedBy(), false);
-    }
-
-    public void publish(
-            DocumentEntity document,
-            int chunkCount,
-            String traceId,
-            UUID triggeredBy,
-            boolean reindex) {
+    public void publish(DocumentEntity document, String traceId, UUID triggeredBy) {
         documentProcessingPublisher.publish(DocumentProcessingEvent.create(
-                DocumentProcessingEventType.DOCUMENT_CHUNKED,
+                DocumentProcessingEventType.DOCUMENT_REINDEX_REQUESTED,
                 document.getId(),
                 traceId,
                 triggeredBy,
-                metadata(document, chunkCount, reindex)));
+                metadata(document)));
     }
 
-    private Map<String, String> metadata(DocumentEntity document, int chunkCount, boolean reindex) {
+    private Map<String, String> metadata(DocumentEntity document) {
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("source", document.getSource());
         metadata.put("businessDomain", document.getBusinessDomain());
         metadata.put("documentType", document.getDocumentType());
         metadata.put("permissionLevel", document.getPermissionLevel());
-        metadata.put("chunkCount", Integer.toString(chunkCount));
-        if (reindex) {
-            metadata.put("operation", "reindex");
-        }
-        if (document.getTextLength() != null) {
-            metadata.put("textLength", document.getTextLength().toString());
-        }
+        metadata.put("operation", "reindex");
+        metadata.put("reindexCount", Integer.toString(document.getReindexCount()));
         return metadata;
     }
 }

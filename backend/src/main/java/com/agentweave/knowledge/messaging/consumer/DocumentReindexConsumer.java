@@ -1,7 +1,7 @@
 package com.agentweave.knowledge.messaging.consumer;
 
-import com.agentweave.knowledge.application.DocumentChunkPipelineService;
 import com.agentweave.knowledge.application.DocumentChunkingResult;
+import com.agentweave.knowledge.application.DocumentReindexPipelineService;
 import com.agentweave.knowledge.messaging.application.DocumentMessageFailureService;
 import com.agentweave.knowledge.messaging.application.DocumentMessageIdempotencyService;
 import com.agentweave.knowledge.messaging.event.DocumentProcessingEvent;
@@ -14,33 +14,33 @@ import org.springframework.stereotype.Component;
 
 @Component
 @ConditionalOnProperty(prefix = "agentweave.document-pipeline.rabbitmq", name = "enabled", havingValue = "true")
-public class DocumentChunkConsumer {
+public class DocumentReindexConsumer {
 
-    public static final String CONSUMER_NAME = "document-chunk-consumer";
+    public static final String CONSUMER_NAME = "document-reindex-consumer";
 
-    private static final Logger log = LoggerFactory.getLogger(DocumentChunkConsumer.class);
+    private static final Logger log = LoggerFactory.getLogger(DocumentReindexConsumer.class);
 
-    private final DocumentChunkPipelineService documentChunkPipelineService;
+    private final DocumentReindexPipelineService documentReindexPipelineService;
     private final DocumentMessageIdempotencyService idempotencyService;
     private final DocumentMessageFailureService failureService;
     private final DocumentChunkedEventPublisher documentChunkedEventPublisher;
 
-    public DocumentChunkConsumer(
-            DocumentChunkPipelineService documentChunkPipelineService,
+    public DocumentReindexConsumer(
+            DocumentReindexPipelineService documentReindexPipelineService,
             DocumentMessageIdempotencyService idempotencyService,
             DocumentMessageFailureService failureService,
             DocumentChunkedEventPublisher documentChunkedEventPublisher) {
-        this.documentChunkPipelineService = documentChunkPipelineService;
+        this.documentReindexPipelineService = documentReindexPipelineService;
         this.idempotencyService = idempotencyService;
         this.failureService = failureService;
         this.documentChunkedEventPublisher = documentChunkedEventPublisher;
     }
 
-    @RabbitListener(queues = "${agentweave.document-pipeline.rabbitmq.queue-prefix}.chunk.queue")
+    @RabbitListener(queues = "${agentweave.document-pipeline.rabbitmq.queue-prefix}.reindex.queue")
     public void handle(DocumentProcessingEvent event) {
         if (idempotencyService.isProcessed(event)) {
             log.info(
-                    "Document chunk event already processed: eventId={}, documentId={}, traceId={}",
+                    "Document reindex event already processed: eventId={}, documentId={}, traceId={}",
                     event.eventId(),
                     event.documentId(),
                     event.traceId());
@@ -48,16 +48,21 @@ public class DocumentChunkConsumer {
         }
 
         log.info(
-                "Document chunk event received: eventId={}, documentId={}, traceId={}, triggeredBy={}",
+                "Document reindex event received: eventId={}, documentId={}, traceId={}, triggeredBy={}",
                 event.eventId(),
                 event.documentId(),
                 event.traceId(),
                 event.triggeredBy());
         try {
-            DocumentChunkingResult result = documentChunkPipelineService.chunkParsedDocument(
+            DocumentChunkingResult result = documentReindexPipelineService.prepareReindex(
                     event.documentId(),
                     event.traceId());
-            documentChunkedEventPublisher.publish(result.document(), result.chunkCount(), event.traceId());
+            documentChunkedEventPublisher.publish(
+                    result.document(),
+                    result.chunkCount(),
+                    event.traceId(),
+                    event.triggeredBy(),
+                    true);
             idempotencyService.markProcessed(event, CONSUMER_NAME);
         } catch (RuntimeException ex) {
             throw failureService.handleConsumerFailure(event, CONSUMER_NAME, ex);

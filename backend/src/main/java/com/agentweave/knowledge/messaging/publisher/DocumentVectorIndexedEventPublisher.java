@@ -31,11 +31,15 @@ public class DocumentVectorIndexedEventPublisher {
     }
 
     public void publish(DocumentEntity document, String traceId) {
+        publish(document, traceId, document.getUploadedBy());
+    }
+
+    public void publish(DocumentEntity document, String traceId, UUID triggeredBy) {
         documentProcessingPublisher.publish(DocumentProcessingEvent.create(
                 DocumentProcessingEventType.DOCUMENT_VECTOR_INDEXED,
                 document.getId(),
                 traceId,
-                document.getUploadedBy(),
+                triggeredBy,
                 Map.of(
                         "source", document.getSource(),
                         "businessDomain", document.getBusinessDomain(),

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.agentweave.knowledge.application.DocumentApplicationService;
 import com.agentweave.knowledge.domain.DocumentEntity;
+import com.agentweave.knowledge.messaging.application.DocumentMessageFailureService;
 import com.agentweave.knowledge.messaging.application.DocumentMessageIdempotencyService;
 import com.agentweave.knowledge.messaging.event.DocumentProcessingEvent;
 import com.agentweave.knowledge.messaging.event.DocumentProcessingEventType;
@@ -22,11 +23,14 @@ class DocumentParseConsumerTest {
             org.mockito.Mockito.mock(DocumentApplicationService.class);
     private final DocumentMessageIdempotencyService idempotencyService =
             org.mockito.Mockito.mock(DocumentMessageIdempotencyService.class);
+    private final DocumentMessageFailureService failureService =
+            org.mockito.Mockito.mock(DocumentMessageFailureService.class);
     private final DocumentParsedEventPublisher documentParsedEventPublisher =
             org.mockito.Mockito.mock(DocumentParsedEventPublisher.class);
     private final DocumentParseConsumer consumer = new DocumentParseConsumer(
             documentApplicationService,
             idempotencyService,
+            failureService,
             documentParsedEventPublisher);
 
     private DocumentProcessingEvent event;
@@ -89,14 +93,18 @@ class DocumentParseConsumerTest {
         when(idempotencyService.isProcessed(event)).thenReturn(false);
         when(documentApplicationService.parseUploadedDocument(event.documentId(), event.traceId()))
                 .thenReturn(document);
-        doThrow(new IllegalStateException("rabbitmq unavailable"))
+        IllegalStateException exception = new IllegalStateException("rabbitmq unavailable");
+        doThrow(exception)
                 .when(documentParsedEventPublisher)
                 .publish(document, event.traceId());
+        when(failureService.handleConsumerFailure(event, DocumentParseConsumer.CONSUMER_NAME, exception))
+                .thenReturn(exception);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> consumer.handle(event))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("rabbitmq unavailable");
 
+        verify(failureService).handleConsumerFailure(event, DocumentParseConsumer.CONSUMER_NAME, exception);
         verify(idempotencyService, never()).markProcessed(event, DocumentParseConsumer.CONSUMER_NAME);
     }
 }
