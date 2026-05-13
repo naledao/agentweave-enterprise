@@ -71,6 +71,9 @@ public class SseEventFactory {
                         .source(citation.source())
                         .snippet(citation.snippet())
                         .score(citation.score())
+                        .businessDomain(citation.businessDomain())
+                        .documentType(citation.documentType())
+                        .permissionLevel(citation.permissionLevel())
                         .build())
                 .event("citation")
                 .build();
@@ -159,6 +162,9 @@ public class SseEventFactory {
         private String source;
         private String snippet;
         private Double score;
+        private String businessDomain;
+        private String documentType;
+        private String permissionLevel;
         private String workflowRunId;
         private String stepName;
         private String code;
@@ -261,6 +267,21 @@ public class SseEventFactory {
             return this;
         }
 
+        SseEventPayloadBuilder businessDomain(String businessDomain) {
+            this.businessDomain = businessDomain;
+            return this;
+        }
+
+        SseEventPayloadBuilder documentType(String documentType) {
+            this.documentType = documentType;
+            return this;
+        }
+
+        SseEventPayloadBuilder permissionLevel(String permissionLevel) {
+            this.permissionLevel = permissionLevel;
+            return this;
+        }
+
         SseEventPayloadBuilder workflowRunId(String workflowRunId) {
             this.workflowRunId = workflowRunId;
             return this;
@@ -308,6 +329,9 @@ public class SseEventFactory {
                     source,
                     snippet,
                     score,
+                    businessDomain,
+                    documentType,
+                    permissionLevel,
                     workflowRunId,
                     stepName,
                     code,

@@ -20,8 +20,13 @@
       v-for="message in messages"
       :key="message.id"
       :message="message"
+      @open-context="emit('open-context', $event)"
     />
-    <StreamingMessage v-if="showStreamingMessage" :stream="stream" />
+    <StreamingMessage
+      v-if="showStreamingMessage"
+      :stream="stream"
+      @open-context="emit('open-context', $event)"
+    />
   </div>
 </template>
 
@@ -42,6 +47,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'page-change': [page: number]
+  'open-context': [target: 'citations' | 'graphPaths']
 }>()
 
 const messageListRef = ref<HTMLElement | null>(null)

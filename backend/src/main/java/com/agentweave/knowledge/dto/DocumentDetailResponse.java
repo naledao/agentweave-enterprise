@@ -24,12 +24,14 @@ public record DocumentDetailResponse(
         Instant createdAt,
         Instant updatedAt,
         GraphRagIndexSummaryResponse graphRag,
-        List<DocumentChunkResponse> chunks) {
+        List<DocumentChunkResponse> chunks,
+        List<DocumentCitationRecordResponse> citationRecords) {
 
     public static DocumentDetailResponse from(
             DocumentEntity document,
             List<DocumentChunkEntity> chunks,
-            GraphRagIndexSummaryResponse graphRag) {
+            GraphRagIndexSummaryResponse graphRag,
+            List<DocumentCitationRecordResponse> citationRecords) {
         DocumentResponse summary = DocumentResponse.from(document, chunks.size());
         return new DocumentDetailResponse(
                 summary.documentId(),
@@ -50,6 +52,7 @@ public record DocumentDetailResponse(
                 graphRag,
                 chunks.stream()
                         .map(DocumentChunkResponse::from)
-                        .toList());
+                        .toList(),
+                citationRecords == null ? List.of() : List.copyOf(citationRecords));
     }
 }

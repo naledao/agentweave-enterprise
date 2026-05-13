@@ -159,6 +159,9 @@ export function normalizeStreamEvent(eventType: string, data: Record<string, unk
         title: stringField(citation.title ?? citation.documentTitle),
         snippet: stringField(citation.snippet),
         score: optionalNumberField(citation.score),
+        businessDomain: optionalStringField(citation.businessDomain),
+        documentType: optionalStringField(citation.documentType),
+        permissionLevel: optionalStringField(citation.permissionLevel),
       }
     }
     case 'graph_path': {

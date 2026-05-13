@@ -15,6 +15,15 @@
       </div>
     </div>
     <MarkdownContent :content="message.content" />
+    <RagTracePanel
+      v-if="message.role === 'ASSISTANT'"
+      :citations="message.citations"
+      :graph-paths="message.graphPaths"
+      :retrieval-mode="message.retrievalMode"
+      :successful="message.status === 'SUCCEEDED'"
+      @open-citations="$emit('open-context', 'citations')"
+      @open-graph-paths="$emit('open-context', 'graphPaths')"
+    />
     <TraceIdText v-if="message.traceId" class="message-trace" :trace-id="message.traceId" />
     <el-alert
       v-if="message.errorMessage"
@@ -31,12 +40,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import RagTracePanel from '@/features/chat/components/RagTracePanel.vue'
 import type { ChatMessage } from '@/features/chat/types'
 import MarkdownContent from '@/shared/components/MarkdownContent.vue'
 import TraceIdText from '@/shared/components/TraceIdText.vue'
 
 const props = defineProps<{
   message: ChatMessage
+}>()
+
+defineEmits<{
+  'open-context': [target: 'citations' | 'graphPaths']
 }>()
 
 const roleLabel = computed(() => {

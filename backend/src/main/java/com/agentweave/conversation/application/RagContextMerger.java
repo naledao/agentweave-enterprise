@@ -88,7 +88,10 @@ public class RagContextMerger {
                 title,
                 citation.source(),
                 citation.snippet(),
-                citation.score());
+                citation.score(),
+                citation.businessDomain(),
+                citation.documentType(),
+                citation.permissionLevel());
     }
 
     private String buildPromptContext(List<CitationEventResponse> citations, List<GraphPathResponse> graphPaths) {

@@ -121,6 +121,14 @@
         </div>
         <DocumentChunkList :chunks="detail?.chunks ?? []" />
       </section>
+
+      <section class="page-surface citation-record-panel">
+        <div class="panel-heading">
+          <h3>引用记录</h3>
+          <span class="muted-text">{{ detail?.citationRecords.length ?? 0 }} 条问答引用</span>
+        </div>
+        <DocumentCitationRecords :records="detail?.citationRecords ?? []" />
+      </section>
     </div>
   </section>
 </template>
@@ -135,6 +143,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { documentsApi } from '@/features/knowledge/api/documentsApi'
 import GraphRagIndexPanel from '@/features/knowledge/components/GraphRagIndexPanel.vue'
 import DocumentChunkList from '@/features/knowledge/components/DocumentChunkList.vue'
+import DocumentCitationRecords from '@/features/knowledge/components/DocumentCitationRecords.vue'
 import DocumentProcessingTimeline from '@/features/knowledge/components/DocumentProcessingTimeline.vue'
 import DocumentStatusTag from '@/features/knowledge/components/DocumentStatusTag.vue'
 import PageHeader from '@/shared/components/PageHeader.vue'
@@ -254,7 +263,8 @@ function formatDateTime(value: string | null): string {
 .summary-panel,
 .timeline-panel,
 .graph-panel,
-.chunk-panel {
+.chunk-panel,
+.citation-record-panel {
   padding: 18px;
 }
 
@@ -338,7 +348,8 @@ h3 {
   align-self: start;
 }
 
-.chunk-panel {
+.chunk-panel,
+.citation-record-panel {
   grid-column: 1 / -1;
 }
 

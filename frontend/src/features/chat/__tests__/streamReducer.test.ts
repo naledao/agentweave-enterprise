@@ -59,6 +59,9 @@ describe('streamReducer', () => {
       title: '排障手册',
       snippet: '先检查服务健康状态。',
       score: 0.91,
+      businessDomain: 'order',
+      documentType: 'RUNBOOK',
+      permissionLevel: 'INTERNAL',
     })
     state = reduceStreamEvent(state, {
       type: 'graph_path',
@@ -95,6 +98,9 @@ describe('streamReducer', () => {
       documentName: 'runbook',
       chunkId: 'chunk-1',
       source: 'knowledge-base',
+      businessDomain: 'order',
+      documentType: 'RUNBOOK',
+      permissionLevel: 'INTERNAL',
     })
     expect(state.graphPaths).toEqual([
       {
@@ -129,6 +135,38 @@ describe('streamReducer', () => {
     state = reduceStreamEvent(state, { type: 'message_delta', eventId: 'evt-duplicate', delta: '不应出现' })
 
     expect(state.content).toBe('只追加一次')
+  })
+
+  it('updates citation cards by chunk id', () => {
+    let state = createInitialStreamState()
+
+    state = reduceStreamEvent(state, {
+      type: 'citation',
+      eventId: 'evt-citation-a',
+      documentId: 'doc-1',
+      documentName: 'runbook',
+      chunkId: 'chunk-1',
+      title: 'Runbook',
+      snippet: 'old snippet',
+      score: 0.6,
+    })
+    state = reduceStreamEvent(state, {
+      type: 'citation',
+      eventId: 'evt-citation-b',
+      documentId: 'doc-1',
+      documentName: 'runbook',
+      chunkId: 'chunk-1',
+      title: 'Runbook',
+      snippet: 'updated snippet',
+      score: 0.9,
+    })
+
+    expect(state.citations).toHaveLength(1)
+    expect(state.citations[0]).toMatchObject({
+      chunkId: 'chunk-1',
+      snippet: 'updated snippet',
+      score: 0.9,
+    })
   })
 
   it('does not append tokens after done', () => {

@@ -45,6 +45,9 @@ public class MessageMetadataService {
         putIfPresent(metadata, "source", citation.source());
         putIfPresent(metadata, "snippet", citation.snippet());
         putIfPresent(metadata, "score", citation.score());
+        putIfPresent(metadata, "businessDomain", citation.businessDomain());
+        putIfPresent(metadata, "documentType", citation.documentType());
+        putIfPresent(metadata, "permissionLevel", citation.permissionLevel());
         return metadata;
     }
 

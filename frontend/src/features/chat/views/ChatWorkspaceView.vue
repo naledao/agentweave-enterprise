@@ -40,6 +40,7 @@
         :page="messagePage"
         :size="messageSize"
         :total="messageTotal"
+        @open-context="focusContext"
         @page-change="changeMessagePage"
       />
 
@@ -52,10 +53,18 @@
       />
     </main>
 
-    <aside class="context-panel">
+    <aside ref="contextPanelRef" class="context-panel" tabindex="-1">
       <AssistantGenerationPanel :messages="assistantPlaceholders" />
-      <CitationPanel :citations="streamState.citations" />
-      <GraphPathPanel :graph-paths="streamState.graphPaths" />
+      <CitationPanel
+        ref="citationPanelRef"
+        :citations="activeCitations"
+        :empty-text="citationEmptyText"
+      />
+      <GraphPathPanel
+        ref="graphPathPanelRef"
+        :graph-paths="activeGraphPaths"
+        hide-when-empty
+      />
       <ToolCallPanel :invocations="streamState.toolInvocations" />
       <WorkflowStepPanel :steps="streamState.workflowSteps" />
     </aside>
@@ -64,7 +73,7 @@
 
 <script setup lang="ts">
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { openChatStream } from '@/features/chat/api/chatStreamClient'
@@ -104,6 +113,9 @@ const keyword = ref('')
 const messagePage = ref(0)
 const messageSize = 20
 const streamConnection = ref<StreamConnection | null>(null)
+const contextPanelRef = ref<HTMLElement | null>(null)
+const citationPanelRef = ref<{ $el: HTMLElement } | null>(null)
+const graphPathPanelRef = ref<{ $el: HTMLElement } | null>(null)
 const activeStreamTask = ref<ActiveStreamTask | null>(null)
 const activeAssistantMessageId = ref<string | null>(null)
 const streamState = reactive<ChatStreamState>(createInitialStreamState())
@@ -199,6 +211,30 @@ const visibleMessages = computed<ChatMessage[]>(() =>
   messages.value.filter((message) => !isAssistantPlaceholder(message)),
 )
 const messageTotal = computed(() => activeConversation.value?.messageTotal ?? 0)
+const latestAssistantMessage = computed(() =>
+  [...messages.value].reverse().find((message) => message.role === 'ASSISTANT') ?? null,
+)
+const activeCitations = computed(() => {
+  if (streamState.citations.length > 0 || isStreaming.value || streamState.status === 'failed') {
+    return streamState.citations
+  }
+
+  return latestAssistantMessage.value?.citations ?? []
+})
+const activeGraphPaths = computed(() => {
+  if (streamState.graphPaths.length > 0 || isStreaming.value || streamState.status === 'failed') {
+    return streamState.graphPaths
+  }
+
+  return latestAssistantMessage.value?.graphPaths ?? []
+})
+const citationEmptyText = computed(() => {
+  if (latestAssistantMessage.value?.status === 'SUCCEEDED' || streamState.status === 'completed') {
+    return '本次回答没有返回引用资料'
+  }
+
+  return '暂无引用'
+})
 const isStreaming = computed(() => ['connecting', 'streaming', 'tool_calling'].includes(streamState.status))
 const inputDisabled = computed(() => sendMessageMutation.isPending.value || isStreaming.value)
 const streamStatusTag = computed(() => {
@@ -249,6 +285,13 @@ function changeMessagePage(page: number): void {
   pageError.value = null
   cancelStream()
   messagePage.value = page
+}
+
+async function focusContext(target: 'citations' | 'graphPaths'): Promise<void> {
+  await nextTick()
+  const panel = target === 'citations' ? citationPanelRef.value?.$el : graphPathPanelRef.value?.$el
+  panel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  contextPanelRef.value?.focus()
 }
 
 async function sendMessage(content: string): Promise<void> {

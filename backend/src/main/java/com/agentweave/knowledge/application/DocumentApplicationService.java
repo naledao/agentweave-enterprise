@@ -1,9 +1,11 @@
 package com.agentweave.knowledge.application;
 
+import com.agentweave.conversation.repository.ConversationMessageRepository;
 import com.agentweave.knowledge.domain.DocumentEntity;
 import com.agentweave.knowledge.domain.DocumentChunkEntity;
 import com.agentweave.knowledge.domain.DocumentStatus;
 import com.agentweave.knowledge.dto.CreateDocumentRequest;
+import com.agentweave.knowledge.dto.DocumentCitationRecordResponse;
 import com.agentweave.knowledge.dto.DocumentDetailResponse;
 import com.agentweave.knowledge.dto.DocumentListResponse;
 import com.agentweave.knowledge.dto.DocumentQueryRequest;
@@ -53,9 +55,11 @@ public class DocumentApplicationService {
     private static final String PARSE_PERMISSION = "knowledge:document:parse";
     private static final String DELETE_PERMISSION = "knowledge:document:delete";
     private static final int CHECKSUM_BUFFER_SIZE = 8192;
+    private static final int DOCUMENT_CITATION_RECORD_LIMIT = 20;
 
     private final DocumentRepository documentRepository;
     private final DocumentChunkRepository documentChunkRepository;
+    private final ConversationMessageRepository conversationMessageRepository;
     private final DocumentMetadataFactory documentMetadataFactory;
     private final DocumentChunkingService documentChunkingService;
     private final DocumentCleaningService documentCleaningService;
@@ -74,6 +78,7 @@ public class DocumentApplicationService {
     public DocumentApplicationService(
             DocumentRepository documentRepository,
             DocumentChunkRepository documentChunkRepository,
+            ConversationMessageRepository conversationMessageRepository,
             DocumentMetadataFactory documentMetadataFactory,
             DocumentChunkingService documentChunkingService,
             DocumentCleaningService documentCleaningService,
@@ -90,6 +95,7 @@ public class DocumentApplicationService {
             ObjectProvider<DocumentUploadedEventPublisher> documentUploadedEventPublisherProvider) {
         this.documentRepository = documentRepository;
         this.documentChunkRepository = documentChunkRepository;
+        this.conversationMessageRepository = conversationMessageRepository;
         this.documentMetadataFactory = documentMetadataFactory;
         this.documentChunkingService = documentChunkingService;
         this.documentCleaningService = documentCleaningService;
@@ -166,14 +172,23 @@ public class DocumentApplicationService {
 
     @Transactional(readOnly = true)
     public DocumentDetailResponse get(UUID documentId) {
-        currentUserService.requireCurrentUser();
+        CurrentUser user = currentUserService.requireCurrentUser();
         DocumentEntity document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("document not found"));
         List<DocumentChunkEntity> chunks = documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId);
+        List<DocumentCitationRecordResponse> citationRecords = conversationMessageRepository
+                .findRecentAssistantMessagesReferencingDocument(
+                        user.id(),
+                        documentId.toString(),
+                        DOCUMENT_CITATION_RECORD_LIMIT)
+                .stream()
+                .map(DocumentCitationRecordResponse::from)
+                .toList();
         return DocumentDetailResponse.from(
                 document,
                 chunks,
-                graphRagIndexLogService.latestSummary(documentId));
+                graphRagIndexLogService.latestSummary(documentId),
+                citationRecords);
     }
 
     @Transactional

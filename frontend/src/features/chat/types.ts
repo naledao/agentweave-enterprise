@@ -4,6 +4,7 @@ export type ChatMessageStatus = 'PENDING' | 'SUCCEEDED' | 'STREAMING' | 'FAILED'
 export type StreamStatus = 'idle' | 'connecting' | 'streaming' | 'tool_calling' | 'completed' | 'failed' | 'cancelled'
 export type ToolInvocationStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED'
 export type WorkflowStepStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'SKIPPED'
+export type RagRetrievalMode = 'VECTOR_ONLY' | 'GRAPH_ONLY' | 'HYBRID'
 
 export interface ConversationSummary {
   id: string
@@ -25,9 +26,10 @@ export interface ChatMessage {
   errorCode?: string | null
   errorMessage?: string | null
   metadata?: string | null
+  retrievalMode?: RagRetrievalMode | null
   traceId?: string | null
-  citations: Citation[]
-  graphPaths: GraphPath[]
+  citations: RagCitation[]
+  graphPaths: RagGraphPath[]
   toolCalls: ToolInvocation[]
   createdAt: string
 }
@@ -66,9 +68,9 @@ export interface SendMessageResponse {
   assistantMessageId: string
   traceId: string
   answer?: string
-  retrievalMode?: 'VECTOR_ONLY' | 'GRAPH_ONLY' | 'HYBRID'
-  citations?: Citation[]
-  graphPaths?: GraphPath[]
+  retrievalMode?: RagRetrievalMode
+  citations?: RagCitation[]
+  graphPaths?: RagGraphPath[]
 }
 
 export interface CancelMessageResponse {
@@ -78,7 +80,7 @@ export interface CancelMessageResponse {
   traceId: string
 }
 
-export interface Citation {
+export interface RagCitation {
   documentId?: string
   documentName?: string
   chunkId?: string
@@ -86,15 +88,31 @@ export interface Citation {
   source?: string
   snippet: string
   score?: number
+  businessDomain?: string
+  documentType?: string
+  permissionLevel?: string
 }
 
-export interface GraphPath {
+export interface RagGraphPath {
   pathId?: string
   depth: number
   entities: string[]
   relationships: string[]
   sourceChunkIds: string[]
   confidence?: number
+}
+
+export type Citation = RagCitation
+export type GraphPath = RagGraphPath
+
+export interface CitationPanelState {
+  citations: RagCitation[]
+  selectedCitationKey?: string | null
+}
+
+export interface GraphPathPanelState {
+  graphPaths: RagGraphPath[]
+  permissionDenied?: boolean
 }
 
 export interface ToolInvocation {
@@ -163,12 +181,17 @@ export interface StreamCitationEvent extends StreamBaseEvent {
   title: string
   snippet: string
   score?: number
+  businessDomain?: string
+  documentType?: string
+  permissionLevel?: string
 }
 
 export interface StreamGraphPathEvent extends StreamBaseEvent {
   type: 'graph_path'
-  graphPath: GraphPath
+  graphPath: RagGraphPath
 }
+
+export type RagSseEvent = StreamCitationEvent | StreamGraphPathEvent
 
 export interface StreamWorkflowStepEvent extends StreamBaseEvent {
   type: 'workflow_step'
@@ -198,6 +221,9 @@ interface LegacyCitation {
   source?: string
   snippet: string
   score?: number
+  businessDomain?: string
+  documentType?: string
+  permissionLevel?: string
 }
 
 interface LegacyWorkflowStep {
@@ -241,8 +267,8 @@ export interface ChatStreamState {
   assistantMessageId: string | null
   content: string
   seenEventIds: string[]
-  citations: Citation[]
-  graphPaths: GraphPath[]
+  citations: RagCitation[]
+  graphPaths: RagGraphPath[]
   toolInvocations: ToolInvocation[]
   workflowSteps: WorkflowStep[]
   error: {

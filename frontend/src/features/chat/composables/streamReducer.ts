@@ -62,18 +62,18 @@ export function reduceStreamEvent(state: ChatStreamState, event: ChatStreamEvent
     case 'citation':
       return {
         ...nextState,
-        citations: [
-          ...nextState.citations,
-          {
-            documentId: event.documentId,
-            documentName: event.documentName,
-            chunkId: event.chunkId,
-            title: event.title,
-            source: event.source,
-            snippet: event.snippet,
-            score: event.score,
-          },
-        ],
+        citations: upsertCitation(nextState.citations, {
+          documentId: event.documentId,
+          documentName: event.documentName,
+          chunkId: event.chunkId,
+          title: event.title,
+          source: event.source,
+          snippet: event.snippet,
+          score: event.score,
+          businessDomain: event.businessDomain,
+          documentType: event.documentType,
+          permissionLevel: event.permissionLevel,
+        }),
       }
     case 'graph_path':
       return {
@@ -110,6 +110,29 @@ export function reduceStreamEvent(state: ChatStreamState, event: ChatStreamEvent
         },
       }
   }
+}
+
+function upsertCitation<T extends { documentId?: string; chunkId?: string; title: string; snippet: string }>(
+  items: T[],
+  next: T,
+): T[] {
+  const key = citationKey(next)
+  const exists = items.some((item) => citationKey(item) === key)
+  if (!exists) {
+    return [...items, next]
+  }
+
+  return items.map((item) => (citationKey(item) === key ? { ...item, ...next } : item))
+}
+
+function citationKey(item: { documentId?: string; chunkId?: string; title: string; snippet: string }): string {
+  if (item.chunkId) {
+    return `chunk:${item.chunkId}`
+  }
+  if (item.documentId) {
+    return `document:${item.documentId}:${item.snippet}`
+  }
+  return `inline:${item.title}:${item.snippet}`
 }
 
 function upsertToolInvocation(items: ToolInvocation[], next: ToolInvocation): ToolInvocation[] {

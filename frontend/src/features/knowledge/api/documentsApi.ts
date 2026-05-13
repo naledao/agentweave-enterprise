@@ -49,7 +49,10 @@ export const knowledgeDocumentApi = {
 
   async detail(documentId: string): Promise<KnowledgeDocumentDetail> {
     const { data } = await httpClient.get<KnowledgeDocumentDetail>(`/documents/${documentId}`)
-    return data
+    return {
+      ...data,
+      citationRecords: data.citationRecords ?? [],
+    }
   },
 
   async parseDocument(documentId: string): Promise<KnowledgeDocument> {

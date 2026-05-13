@@ -3,6 +3,7 @@ package com.agentweave.conversation.repository;
 import com.agentweave.conversation.domain.ConversationMessageEntity;
 import com.agentweave.conversation.domain.MessageRole;
 import com.agentweave.conversation.domain.MessageStatus;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -43,4 +44,20 @@ public interface ConversationMessageRepository extends JpaRepository<Conversatio
             UUID conversationId,
             MessageRole role,
             MessageStatus status);
+
+    @Query(
+            value = """
+                    SELECT *
+                    FROM conversation_messages
+                    WHERE role = 'ASSISTANT'
+                      AND user_id = :userId
+                      AND metadata LIKE CONCAT('%', :documentId, '%')
+                    ORDER BY created_at DESC
+                    LIMIT :limit
+                    """,
+            nativeQuery = true)
+    List<ConversationMessageEntity> findRecentAssistantMessagesReferencingDocument(
+            @Param("userId") UUID userId,
+            @Param("documentId") String documentId,
+            @Param("limit") int limit);
 }

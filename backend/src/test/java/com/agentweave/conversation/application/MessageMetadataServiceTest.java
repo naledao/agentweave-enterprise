@@ -29,7 +29,10 @@ class MessageMetadataServiceTest {
                 "Runbook doc-1",
                 "internal",
                 "service status checklist",
-                0.93d);
+                0.93d,
+                "order",
+                "RUNBOOK",
+                "INTERNAL");
         GraphPathResponse graphPath = new GraphPathResponse(
                 "path-1",
                 2,
@@ -44,6 +47,9 @@ class MessageMetadataServiceTest {
 
         assertThat(root.path("retrievalMode").asText()).isEqualTo("HYBRID");
         assertThat(root.path("citations").size()).isEqualTo(1);
+        assertThat(root.path("citations").get(0).path("businessDomain").asText()).isEqualTo("order");
+        assertThat(root.path("citations").get(0).path("documentType").asText()).isEqualTo("RUNBOOK");
+        assertThat(root.path("citations").get(0).path("permissionLevel").asText()).isEqualTo("INTERNAL");
         assertThat(root.path("graphPaths").size()).isEqualTo(1);
         assertThat(root.path("graphPaths").get(0).path("pathId").asText()).isEqualTo("path-1");
         assertThat(root.path("graphPaths").get(0).path("entities").get(0).asText()).isEqualTo("Order Service");
@@ -63,6 +69,7 @@ class MessageMetadataServiceTest {
 
         ConversationMessageResponse response = ConversationMessageResponse.from(message);
 
+        assertThat(response.retrievalMode()).isEqualTo("HYBRID");
         assertThat(response.citations()).containsExactly(citation);
         assertThat(response.graphPaths()).containsExactly(graphPath);
     }

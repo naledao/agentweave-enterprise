@@ -19,6 +19,7 @@ public record ConversationMessageResponse(
         String errorCode,
         String errorMessage,
         String metadata,
+        String retrievalMode,
         String traceId,
         List<CitationEventResponse> citations,
         List<GraphPathResponse> graphPaths,
@@ -37,6 +38,7 @@ public record ConversationMessageResponse(
                 message.getErrorCode(),
                 message.getErrorMessage(),
                 message.getMetadata(),
+                retrievalModeFromMetadata(message.getMetadata()),
                 message.getTraceId(),
                 citationsFromMetadata(message.getMetadata()),
                 graphPathsFromMetadata(message.getMetadata()),
@@ -62,11 +64,25 @@ public record ConversationMessageResponse(
                         text(citation, "title"),
                         text(citation, "source"),
                         text(citation, "snippet"),
-                        citation.hasNonNull("score") ? citation.get("score").asDouble() : null));
+                        citation.hasNonNull("score") ? citation.get("score").asDouble() : null,
+                        text(citation, "businessDomain"),
+                        text(citation, "documentType"),
+                        text(citation, "permissionLevel")));
             }
             return responses;
         } catch (Exception ex) {
             return List.of();
+        }
+    }
+
+    private static String retrievalModeFromMetadata(String metadata) {
+        if (metadata == null || metadata.isBlank()) {
+            return null;
+        }
+        try {
+            return text(OBJECT_MAPPER.readTree(metadata), "retrievalMode");
+        } catch (Exception ex) {
+            return null;
         }
     }
 

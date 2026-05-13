@@ -6,6 +6,14 @@
     </div>
     <MarkdownContent v-if="content" :content="content" />
     <p v-else class="muted-text">正在连接模型流...</p>
+    <RagTracePanel
+      :citations="stream.citations"
+      :graph-paths="stream.graphPaths"
+      :retrieval-mode="null"
+      :successful="stream.status === 'completed'"
+      @open-citations="$emit('open-context', 'citations')"
+      @open-graph-paths="$emit('open-context', 'graphPaths')"
+    />
     <el-alert
       v-if="error"
       class="stream-error"
@@ -21,12 +29,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import RagTracePanel from '@/features/chat/components/RagTracePanel.vue'
 import type { ChatStreamState } from '@/features/chat/types'
 import MarkdownContent from '@/shared/components/MarkdownContent.vue'
 import TraceIdText from '@/shared/components/TraceIdText.vue'
 
 const props = defineProps<{
   stream: ChatStreamState
+}>()
+
+defineEmits<{
+  'open-context': [target: 'citations' | 'graphPaths']
 }>()
 
 const visible = computed(() => props.stream.status !== 'idle' || Boolean(props.stream.content))

@@ -24,6 +24,14 @@ import com.agentweave.auth.domain.UserEntity;
 import com.agentweave.auth.repository.PermissionRepository;
 import com.agentweave.auth.repository.RoleRepository;
 import com.agentweave.auth.repository.UserRepository;
+import com.agentweave.conversation.application.MessageMetadataService;
+import com.agentweave.conversation.application.RagPromptContext;
+import com.agentweave.conversation.domain.ConversationEntity;
+import com.agentweave.conversation.domain.ConversationMessageEntity;
+import com.agentweave.conversation.domain.MessageRole;
+import com.agentweave.conversation.domain.MessageStatus;
+import com.agentweave.conversation.dto.CitationEventResponse;
+import com.agentweave.conversation.repository.ConversationRepository;
 import com.agentweave.knowledge.application.DocumentStorageException;
 import com.agentweave.knowledge.application.DocumentApplicationService;
 import com.agentweave.knowledge.application.DocumentStorageService;
@@ -44,7 +52,6 @@ import java.io.InputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -91,6 +98,12 @@ class DocumentControllerIntegrationTest {
     @Autowired
     private DocumentApplicationService documentApplicationService;
 
+    @Autowired
+    private ConversationRepository conversationRepository;
+
+    @Autowired
+    private MessageMetadataService messageMetadataService;
+
     @MockitoBean
     private DocumentStorageService documentStorageService;
 
@@ -108,6 +121,8 @@ class DocumentControllerIntegrationTest {
 
     private String uploadToken;
     private String noPermissionToken;
+    private UserEntity uploader;
+    private UserEntity plainUser;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -144,7 +159,7 @@ class DocumentControllerIntegrationTest {
                 null);
         plainRole = roleRepository.save(plainRole);
 
-        UserEntity uploader = new UserEntity(
+        uploader = new UserEntity(
                 UUID.randomUUID(),
                 "doc_uploader_" + suffix,
                 "Document Uploader",
@@ -153,7 +168,7 @@ class DocumentControllerIntegrationTest {
         uploader.replaceRoles(List.of(uploaderRole));
         userRepository.save(uploader);
 
-        UserEntity plainUser = new UserEntity(
+        plainUser = new UserEntity(
                 UUID.randomUUID(),
                 "doc_plain_" + suffix,
                 "Document Plain",
@@ -895,6 +910,42 @@ class DocumentControllerIntegrationTest {
     }
 
     @Test
+    void getDocumentReturnsOwnedCitationRecords() throws Exception {
+        String filename = "citation-record-" + UUID.randomUUID() + ".txt";
+        MvcResult result = mockMvc.perform(multipart("/api/v1/documents")
+                        .file(textFile(filename, "hello, world!"))
+                        .param("source", "runbook")
+                        .param("businessDomain", "order")
+                        .param("documentType", "RUNBOOK")
+                        .param("permissionLevel", "INTERNAL")
+                        .header("Authorization", "Bearer " + uploadToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        UUID documentId = UUID.fromString(objectMapper
+                .readTree(result.getResponse().getContentAsString())
+                .get("documentId")
+                .asText());
+        createAssistantCitationMessage(
+                uploader.getId(),
+                documentId,
+                "Owned answer with citation",
+                "trace-owned-citation");
+        createAssistantCitationMessage(
+                plainUser.getId(),
+                documentId,
+                "Other user citation should stay hidden",
+                "trace-hidden-citation");
+
+        mockMvc.perform(get("/api/v1/documents/{documentId}", documentId)
+                        .header("Authorization", "Bearer " + uploadToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.citationRecords.length()").value(1))
+                .andExpect(jsonPath("$.citationRecords[0].messagePreview").value("Owned answer with citation"))
+                .andExpect(jsonPath("$.citationRecords[0].traceId").value("trace-owned-citation"));
+    }
+
+    @Test
     void getDocumentReturnsNotFoundForMissingDocument() throws Exception {
         mockMvc.perform(get("/api/v1/documents/{documentId}", UUID.randomUUID())
                         .header("Authorization", "Bearer " + uploadToken))
@@ -1023,6 +1074,42 @@ class DocumentControllerIntegrationTest {
 
     private ByteArrayInputStream stream(String content) {
         return new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void createAssistantCitationMessage(
+            UUID ownerUserId,
+            UUID documentId,
+            String content,
+            String traceId) {
+        ConversationEntity conversation = new ConversationEntity(
+                UUID.randomUUID(),
+                ownerUserId,
+                "RAG citation");
+        ConversationMessageEntity message = new ConversationMessageEntity(
+                UUID.randomUUID(),
+                ownerUserId,
+                MessageRole.ASSISTANT,
+                content,
+                MessageStatus.SUCCEEDED,
+                traceId);
+        message.replaceMetadata(messageMetadataService.assistantRagMetadata(new RagPromptContext(
+                "VECTOR_ONLY",
+                "prompt",
+                List.of(new CitationEventResponse(
+                        documentId.toString(),
+                        filenameFor(documentId),
+                        "chunk-1",
+                        filenameFor(documentId),
+                        "runbook",
+                        "citation snippet",
+                        0.91d)),
+                List.of())));
+        conversation.addMessage(message);
+        conversationRepository.saveAndFlush(conversation);
+    }
+
+    private String filenameFor(UUID documentId) {
+        return "document-" + documentId;
     }
 
     private record LoginPayload(String username, String password) {

@@ -24,9 +24,9 @@ describe('GraphPathPanel', () => {
     expect(screen.getByText('path-1')).toBeInTheDocument()
     expect(screen.getByText('order-service')).toBeInTheDocument()
     expect(screen.getByText('payment-api')).toBeInTheDocument()
-    expect(screen.getByText('CALLS')).toBeInTheDocument()
+    expect(screen.getAllByText('CALLS').length).toBeGreaterThan(0)
     expect(screen.getByText('chunks: chunk-1')).toBeInTheDocument()
-    expect(screen.getByText('confidence: 0.780')).toBeInTheDocument()
+    expect(screen.getByText('confidence 0.780')).toBeInTheDocument()
   })
 
   it('shows an empty state', () => {
@@ -37,5 +37,28 @@ describe('GraphPathPanel', () => {
     })
 
     expect(screen.getByText('暂无图谱路径')).toBeInTheDocument()
+  })
+
+  it('hides empty graph path cards when requested', () => {
+    const { container } = render(GraphPathPanel, {
+      props: {
+        graphPaths: [],
+        hideWhenEmpty: true,
+      },
+    })
+
+    expect(container.textContent).toBe('')
+  })
+
+  it('shows permission state without leaking entity names', () => {
+    render(GraphPathPanel, {
+      props: {
+        graphPaths: [],
+        permissionDenied: true,
+        hideWhenEmpty: true,
+      },
+    })
+
+    expect(screen.getByText('当前权限不可查看部分图谱路径。')).toBeInTheDocument()
   })
 })

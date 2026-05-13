@@ -1,21 +1,43 @@
 <template>
   <section class="panel-section">
-    <h3>引用资料</h3>
-    <div v-if="citations.length === 0" class="panel-empty">暂无引用</div>
-    <article v-for="citation in citations" v-else :key="citation.chunkId ?? citation.documentId ?? citation.title" class="citation-card">
-      <strong>{{ citation.title }}</strong>
-      <p>{{ citation.snippet }}</p>
-      <span v-if="citation.score !== undefined" class="muted-text">score: {{ citation.score.toFixed(3) }}</span>
-    </article>
+    <div class="panel-title-row">
+      <h3>引用资料</h3>
+      <el-tag v-if="citations.length" effect="plain" type="info">{{ citations.length }}</el-tag>
+    </div>
+    <div v-if="citations.length === 0" class="panel-empty">{{ emptyText }}</div>
+    <CitationCard
+      v-for="citation in citations"
+      v-else
+      :key="citationKey(citation)"
+      :citation="citation"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import type { Citation } from '@/features/chat/types'
+import CitationCard from '@/features/chat/components/CitationCard.vue'
+import type { RagCitation } from '@/features/chat/types'
 
-defineProps<{
-  citations: Citation[]
-}>()
+withDefaults(defineProps<{
+  citations: RagCitation[]
+  emptyText?: string
+}>(), {
+  emptyText: '暂无引用',
+})
+
+function citationKey(citation: RagCitation): string {
+  if (citation.chunkId) {
+    return `chunk:${citation.chunkId}`
+  }
+  if (citation.documentId) {
+    return `document:${citation.documentId}:${citation.snippet}`
+  }
+  return `${citation.title}:${citation.snippet}`
+}
+
+defineExpose({
+  citationKey,
+})
 </script>
 
 <style scoped>
@@ -30,24 +52,15 @@ defineProps<{
   font-size: 15px;
 }
 
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .panel-empty {
   color: #69778d;
   font-size: 13px;
-}
-
-.citation-card {
-  display: grid;
-  gap: 8px;
-  border: 1px solid #dfe5ee;
-  border-radius: 8px;
-  background: #fff;
-  padding: 12px;
-}
-
-.citation-card p {
-  margin: 0;
-  color: #39485f;
-  font-size: 13px;
-  line-height: 1.6;
 }
 </style>

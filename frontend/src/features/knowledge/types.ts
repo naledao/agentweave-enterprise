@@ -93,6 +93,15 @@ export interface GraphRagIndexSummaryResponse {
 export interface KnowledgeDocumentDetail extends KnowledgeDocument {
   graphRag: GraphRagIndexSummaryResponse
   chunks: DocumentChunk[]
+  citationRecords: DocumentCitationRecord[]
+}
+
+export interface DocumentCitationRecord {
+  conversationId: string
+  messageId: string
+  messagePreview: string
+  traceId: string | null
+  createdAt: string
 }
 
 export interface DocumentQuery {

@@ -13,8 +13,18 @@ const baseMessage: ChatMessage = {
   errorCode: null,
   errorMessage: null,
   metadata: '{}',
+  retrievalMode: 'VECTOR_ONLY',
   traceId: null,
-  citations: [],
+  citations: [
+    {
+      documentId: 'doc-1',
+      documentName: 'Order Runbook',
+      chunkId: 'chunk-1',
+      title: 'Order Runbook',
+      snippet: 'restart order worker',
+      score: 0.92,
+    },
+  ],
   graphPaths: [],
   toolCalls: [],
   createdAt: '2026-05-11T15:47:05.485Z',
@@ -55,5 +65,12 @@ describe('ChatMessageList', () => {
     renderMessageList([], completedStream)
 
     expect(screen.getByText('正式助手回复')).toBeInTheDocument()
+  })
+
+  it('shows the citation entry below assistant messages', () => {
+    renderMessageList([baseMessage])
+
+    expect(screen.getByText('引用 1')).toBeInTheDocument()
+    expect(screen.getByText('VECTOR_ONLY')).toBeInTheDocument()
   })
 })
