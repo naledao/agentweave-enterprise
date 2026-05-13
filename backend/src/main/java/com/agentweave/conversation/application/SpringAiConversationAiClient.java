@@ -1,0 +1,128 @@
+package com.agentweave.conversation.application;
+
+import com.agentweave.shared.tracing.CorrelationContext;
+import com.agentweave.shared.tracing.TraceIdProvider;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.SignalType;
+
+@Service
+public class SpringAiConversationAiClient implements ConversationAiClient {
+
+    private static final Logger log = LoggerFactory.getLogger(SpringAiConversationAiClient.class);
+    private static final String SYSTEM_PROMPT = """
+            你是 AgentWeave Enterprise 的企业级 AI Agent 助手。
+            你需要用中文回答，优先给出可执行、可验证的工程化建议。
+            当前阶段尚未接入真实 RAG 和工具执行结果；如果问题需要知识库、日志或工具数据，请明确说明仍需后端工具链补齐。
+            不要编造引用、工具结果、内部日志或不存在的数据。
+            """;
+    private static final String PROVIDER = "openai";
+    private static final String DEFAULT_MODEL = "unknown";
+
+    private final ChatClient chatClient;
+    private final ConversationMemoryService conversationMemoryService;
+
+    public SpringAiConversationAiClient(
+            ChatClient.Builder chatClientBuilder,
+            MessageChatMemoryAdvisor messageChatMemoryAdvisor,
+            ConversationMemoryService conversationMemoryService) {
+        this.chatClient = chatClientBuilder
+                .defaultSystem(SYSTEM_PROMPT)
+                .defaultAdvisors(messageChatMemoryAdvisor)
+                .build();
+        this.conversationMemoryService = conversationMemoryService;
+    }
+
+    @Override
+    public ConversationAiResponse answer(ConversationPrompt prompt) {
+        conversationMemoryService.syncBeforeModelCall(prompt);
+        ChatResponse chatResponse = chatClient.prompt()
+                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, prompt.conversationId().toString()))
+                .user(buildUserPrompt(prompt))
+                .call()
+                .chatResponse();
+        String content = chatResponse.getResult().getOutput().getText();
+        ChatResponseMetadata metadata = chatResponse.getMetadata();
+        Usage usage = metadata == null ? null : metadata.getUsage();
+        return new ConversationAiResponse(
+                content,
+                PROVIDER,
+                model(metadata),
+                promptTokens(usage),
+                completionTokens(usage));
+    }
+
+    @Override
+    public Flux<String> streamAnswer(ConversationPrompt prompt) {
+        conversationMemoryService.syncBeforeModelCall(prompt);
+        String traceId = MDC.get(TraceIdProvider.TRACE_ID_KEY);
+        String conversationId = prompt.conversationId().toString();
+        String messageId = MDC.get(CorrelationContext.MESSAGE_ID_KEY);
+        return chatClient.prompt()
+                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, prompt.conversationId().toString()))
+                .user(buildUserPrompt(prompt))
+                .stream()
+                .content()
+                .doOnSubscribe(ignored -> log.info(
+                        "Provider stream subscribed: traceId={}, conversationId={}, messageId={}",
+                        traceId,
+                        conversationId,
+                        messageId))
+                .doOnCancel(() -> log.info(
+                        "Provider stream cancelled: traceId={}, conversationId={}, messageId={}",
+                        traceId,
+                        conversationId,
+                        messageId))
+                .doFinally(signalType -> logProviderStreamFinished(traceId, conversationId, messageId, signalType))
+                .filter(chunk -> chunk != null && !chunk.isBlank());
+    }
+
+    private String buildUserPrompt(ConversationPrompt prompt) {
+        return """
+                会话标题：%s
+
+                用户消息：
+                %s
+                """.formatted(prompt.title(), prompt.latestUserMessage());
+    }
+
+    private String model(ChatResponseMetadata metadata) {
+        if (metadata == null || metadata.getModel() == null || metadata.getModel().isBlank()) {
+            return DEFAULT_MODEL;
+        }
+        return metadata.getModel();
+    }
+
+    private Integer promptTokens(Usage usage) {
+        return usage == null ? null : usage.getPromptTokens();
+    }
+
+    private Integer completionTokens(Usage usage) {
+        return usage == null ? null : usage.getCompletionTokens();
+    }
+
+    private void logProviderStreamFinished(
+            String traceId,
+            String conversationId,
+            String messageId,
+            SignalType signalType) {
+        if (SignalType.CANCEL.equals(signalType)) {
+            return;
+        }
+        log.info(
+                "Provider stream finished: traceId={}, conversationId={}, messageId={}, signal={}",
+                traceId,
+                conversationId,
+                messageId,
+                signalType);
+    }
+}

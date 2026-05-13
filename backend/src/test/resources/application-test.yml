@@ -1,0 +1,76 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/agentweave_test
+    username: agentweave
+    password: test-postgres-password
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+agentweave:
+  security:
+    jwt:
+      secret: test-agentweave-jwt-secret-with-at-least-32-bytes
+      issuer: agentweave-enterprise-test
+      access-token-ttl: 30m
+    expose-openapi: true
+    cors:
+      allowed-origins:
+        - http://localhost:5173
+  bootstrap:
+    admin-username: admin
+    admin-password: test-admin-password
+    admin-email: admin@agentweave.local
+  chat:
+    stream-timeout: 120s
+    max-concurrent-streams-per-user: 1
+  knowledge:
+    chunking:
+      chunk-size: 1000
+      overlap-size: 200
+    parsing:
+      allowed-content-types:
+        - text/plain
+        - text/markdown
+        - text/csv
+        - application/csv
+        - application/vnd.ms-excel
+      allowed-extensions:
+        - txt
+        - md
+        - csv
+    storage:
+      endpoint: http://localhost:9000
+      access-key: agentweave
+      secret-key: test-minio-secret-key
+      bucket: agentweave-documents
+      create-bucket-if-missing: false
+      max-file-size: 50MB
+      allowed-content-types:
+        - application/pdf
+        - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+        - text/plain
+        - text/markdown
+        - text/csv
+        - application/csv
+        - application/vnd.ms-excel
+        - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      allowed-extensions:
+        - pdf
+        - docx
+        - txt
+        - md
+        - csv
+        - xlsx
+  document-pipeline:
+    rabbitmq:
+      enabled: false
+  graphrag:
+    neo4j:
+      enabled: false

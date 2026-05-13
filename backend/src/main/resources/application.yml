@@ -1,0 +1,147 @@
+spring:
+  application:
+    name: agentweave-enterprise
+  ai:
+    model:
+      chat: openai
+      embedding: ollama
+    openai:
+      base-url: ${AGENTWEAVE_OPENAI_BASE_URL:https://api.openai.com/v1}
+      api-key: ${AGENTWEAVE_OPENAI_API_KEY}
+      chat:
+        completions-path: /chat/completions
+        options:
+          model: mimo-v2.5
+          temperature: 0.3
+    ollama:
+      base-url: ${AGENTWEAVE_OLLAMA_BASE_URL:http://localhost:11434}
+      embedding:
+        model: qwen3-embedding:0.6b
+        options:
+          model: qwen3-embedding:0.6b
+          num-thread: 4
+          keep-alive: 10m
+    vectorstore:
+      pgvector:
+        initialize-schema: false
+        schema-name: public
+        table-name: vector_store
+        dimensions: 1024
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        max-document-batch-size: 16
+  datasource:
+    url: ${AGENTWEAVE_DATASOURCE_URL:jdbc:postgresql://localhost:5432/agentweave}
+    username: ${AGENTWEAVE_DATASOURCE_USERNAME:agentweave}
+    password: ${AGENTWEAVE_DATASOURCE_PASSWORD}
+  rabbitmq:
+    host: ${AGENTWEAVE_RABBITMQ_HOST:localhost}
+    port: ${AGENTWEAVE_RABBITMQ_PORT:5672}
+    username: ${AGENTWEAVE_RABBITMQ_USERNAME:agentweave}
+    password: ${AGENTWEAVE_RABBITMQ_PASSWORD}
+    virtual-host: ${AGENTWEAVE_RABBITMQ_VHOST:/agentweave}
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 2s
+          multiplier: 2
+          max-interval: 30s
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+agentweave:
+  security:
+    jwt:
+      secret: ${AGENTWEAVE_JWT_SECRET}
+      issuer: agentweave-enterprise
+      access-token-ttl: 2h
+    expose-openapi: ${AGENTWEAVE_EXPOSE_OPENAPI:false}
+    cors:
+      allowed-origins:
+        - ${AGENTWEAVE_CORS_ALLOWED_ORIGIN:http://localhost:5173}
+  bootstrap:
+    admin-username: ${AGENTWEAVE_ADMIN_USERNAME:admin}
+    admin-password: ${AGENTWEAVE_ADMIN_PASSWORD}
+    admin-email: ${AGENTWEAVE_ADMIN_EMAIL:admin@agentweave.local}
+  chat:
+    stream-timeout: ${AGENTWEAVE_CHAT_STREAM_TIMEOUT:120s}
+    max-concurrent-streams-per-user: ${AGENTWEAVE_CHAT_MAX_CONCURRENT_STREAMS_PER_USER:3}
+  knowledge:
+    chunking:
+      chunk-size: 1000
+      overlap-size: 200
+    parsing:
+      allowed-content-types:
+        - text/plain
+        - text/markdown
+        - text/csv
+        - application/csv
+        - application/vnd.ms-excel
+      allowed-extensions:
+        - txt
+        - md
+        - csv
+    storage:
+      endpoint: ${AGENTWEAVE_MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${AGENTWEAVE_MINIO_ACCESS_KEY}
+      secret-key: ${AGENTWEAVE_MINIO_SECRET_KEY}
+      bucket: agentweave-documents
+      create-bucket-if-missing: true
+      max-file-size: 50MB
+      allowed-content-types:
+        - application/pdf
+        - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+        - text/plain
+        - text/markdown
+        - text/csv
+        - application/csv
+        - application/vnd.ms-excel
+        - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      allowed-extensions:
+        - pdf
+        - docx
+        - txt
+        - md
+        - csv
+        - xlsx
+  document-pipeline:
+    rabbitmq:
+      enabled: ${AGENTWEAVE_DOCUMENT_PIPELINE_RABBITMQ_ENABLED:true}
+      exchange: agentweave.document.exchange
+      retry-exchange: agentweave.document.retry.exchange
+      dead-letter-exchange: agentweave.document.dlx
+      queue-prefix: agentweave.document
+  graphrag:
+    neo4j:
+      enabled: ${AGENTWEAVE_GRAPHRAG_NEO4J_ENABLED:true}
+      base-url: ${AGENTWEAVE_GRAPHRAG_NEO4J_BASE_URL:http://localhost:7474}
+      database: ${AGENTWEAVE_GRAPHRAG_NEO4J_DATABASE:neo4j}
+      username: ${AGENTWEAVE_GRAPHRAG_NEO4J_USERNAME:neo4j}
+      password: ${AGENTWEAVE_GRAPHRAG_NEO4J_PASSWORD}

@@ -1,0 +1,2 @@
+ALTER TABLE documents
+    ADD COLUMN reindex_count INTEGER NOT NULL DEFAULT 0;
