@@ -7,6 +7,7 @@ export function createInitialStreamState(): ChatStreamState {
     content: '',
     seenEventIds: [],
     citations: [],
+    graphPaths: [],
     toolInvocations: [],
     workflowSteps: [],
     error: null,
@@ -65,12 +66,19 @@ export function reduceStreamEvent(state: ChatStreamState, event: ChatStreamEvent
           ...nextState.citations,
           {
             documentId: event.documentId,
+            documentName: event.documentName,
             chunkId: event.chunkId,
             title: event.title,
+            source: event.source,
             snippet: event.snippet,
             score: event.score,
           },
         ],
+      }
+    case 'graph_path':
+      return {
+        ...nextState,
+        graphPaths: upsertGraphPath(nextState.graphPaths, event.graphPath),
       }
     case 'workflow_step':
       return {
@@ -115,4 +123,17 @@ function upsertToolInvocation(items: ToolInvocation[], next: ToolInvocation): To
 
 function findToolName(items: ToolInvocation[], toolCallId: string): string {
   return items.find((item) => item.toolCallId === toolCallId)?.toolName ?? 'unknown'
+}
+
+function upsertGraphPath<T extends { pathId?: string }>(items: T[], next: T): T[] {
+  if (!next.pathId) {
+    return [...items, next]
+  }
+
+  const exists = items.some((item) => item.pathId === next.pathId)
+  if (!exists) {
+    return [...items, next]
+  }
+
+  return items.map((item) => (item.pathId === next.pathId ? next : item))
 }

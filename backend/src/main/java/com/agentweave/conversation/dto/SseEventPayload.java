@@ -1,5 +1,6 @@
 package com.agentweave.conversation.dto;
 
+import com.agentweave.graphrag.dto.GraphPathResponse;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 import java.util.UUID;
@@ -11,6 +12,7 @@ public record SseEventPayload(
         UUID messageId,
         String traceId,
         Instant timestamp,
+        Instant createdAt,
         String delta,
         String toolCallId,
         String toolName,
@@ -28,5 +30,6 @@ public record SseEventPayload(
         String workflowRunId,
         String stepName,
         String code,
-        String message) {
+        String message,
+        GraphPathResponse graphPath) {
 }

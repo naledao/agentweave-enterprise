@@ -53,10 +53,25 @@ describe('streamReducer', () => {
       type: 'citation',
       eventId: 'evt-citation',
       documentId: 'doc-1',
+      documentName: 'runbook',
       chunkId: 'chunk-1',
+      source: 'knowledge-base',
       title: '排障手册',
       snippet: '先检查服务健康状态。',
       score: 0.91,
+    })
+    state = reduceStreamEvent(state, {
+      type: 'graph_path',
+      eventId: 'evt-graph-path',
+      graphPath: {
+        pathId: 'path-1',
+        depth: 2,
+        entities: ['order-service', 'payment-api'],
+        relationships: ['CALLS'],
+        sourceChunkIds: ['chunk-1'],
+        confidence: 0.78,
+      },
+      traceId: 'trace-1',
     })
     state = reduceStreamEvent(state, {
       type: 'workflow_step',
@@ -75,6 +90,22 @@ describe('streamReducer', () => {
     })
 
     expect(state.citations).toHaveLength(1)
+    expect(state.citations[0]).toMatchObject({
+      documentId: 'doc-1',
+      documentName: 'runbook',
+      chunkId: 'chunk-1',
+      source: 'knowledge-base',
+    })
+    expect(state.graphPaths).toEqual([
+      {
+        pathId: 'path-1',
+        depth: 2,
+        entities: ['order-service', 'payment-api'],
+        relationships: ['CALLS'],
+        sourceChunkIds: ['chunk-1'],
+        confidence: 0.78,
+      },
+    ])
     expect(state.workflowSteps).toEqual([
       {
         workflowRunId: 'run-1',

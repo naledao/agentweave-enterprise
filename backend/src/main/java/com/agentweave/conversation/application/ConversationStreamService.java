@@ -96,6 +96,13 @@ public class ConversationStreamService {
                                 assistantMessageId,
                                 citation,
                                 traceId)));
+        Flux<ServerSentEvent<?>> graphPaths = Flux.fromIterable(ragContext.graphPaths())
+                .map(graphPath -> withCorrelation(traceId, conversationId, assistantMessageId, () ->
+                        sseEventFactory.graphPath(
+                                conversationId,
+                                assistantMessageId,
+                                graphPath,
+                                traceId)));
         Flux<String> answerStream = Flux.defer(() -> {
             CorrelationContext.Scope scope = correlationContext.open(traceId, conversationId, assistantMessageId);
             try {
@@ -145,7 +152,7 @@ public class ConversationStreamService {
                 streamTask.cancellationSignal(),
                 timeoutSignal);
         AtomicReference<StreamTermination> terminationRef = new AtomicReference<>();
-        Flux<ServerSentEvent<?>> stream = Flux.concat(prefix, citations, deltas, done);
+        Flux<ServerSentEvent<?>> stream = Flux.concat(prefix, citations, graphPaths, deltas, done);
         return stream.takeUntilOther(cancellationSignal.doOnNext(termination ->
                         {
                             terminationRef.set(termination);

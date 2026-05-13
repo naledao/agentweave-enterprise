@@ -55,6 +55,7 @@
     <aside class="context-panel">
       <AssistantGenerationPanel :messages="assistantPlaceholders" />
       <CitationPanel :citations="streamState.citations" />
+      <GraphPathPanel :graph-paths="streamState.graphPaths" />
       <ToolCallPanel :invocations="streamState.toolInvocations" />
       <WorkflowStepPanel :steps="streamState.workflowSteps" />
     </aside>
@@ -73,6 +74,7 @@ import ChatInput from '@/features/chat/components/ChatInput.vue'
 import ChatMessageList from '@/features/chat/components/ChatMessageList.vue'
 import CitationPanel from '@/features/chat/components/CitationPanel.vue'
 import ConversationList from '@/features/chat/components/ConversationList.vue'
+import GraphPathPanel from '@/features/chat/components/GraphPathPanel.vue'
 import ToolCallPanel from '@/features/chat/components/ToolCallPanel.vue'
 import WorkflowStepPanel from '@/features/chat/components/WorkflowStepPanel.vue'
 import { createInitialStreamState, reduceStreamEvent } from '@/features/chat/composables/streamReducer'
@@ -359,6 +361,7 @@ function appendOptimisticUserMessage(conversationId: string, content: string): v
             metadata: '{}',
             traceId: null,
             citations: [],
+            graphPaths: [],
             toolCalls: [],
             createdAt: now,
           },
@@ -373,6 +376,7 @@ function appendOptimisticUserMessage(conversationId: string, content: string): v
             metadata: '{}',
             traceId: null,
             citations: [],
+            graphPaths: [],
             toolCalls: [],
             createdAt: now,
           },
@@ -396,6 +400,7 @@ function assignStreamState(next: ChatStreamState): void {
   streamState.content = next.content
   streamState.seenEventIds = next.seenEventIds
   streamState.citations = next.citations
+  streamState.graphPaths = next.graphPaths
   streamState.toolInvocations = next.toolInvocations
   streamState.workflowSteps = next.workflowSteps
   streamState.error = next.error

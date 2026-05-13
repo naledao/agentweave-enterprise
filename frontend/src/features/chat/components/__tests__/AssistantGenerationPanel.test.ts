@@ -15,6 +15,7 @@ const pendingAssistantMessage: ChatMessage = {
   metadata: '{}',
   traceId: 'trace-1',
   citations: [],
+  graphPaths: [],
   toolCalls: [],
   createdAt: '2026-05-12T00:11:45.000Z',
 }

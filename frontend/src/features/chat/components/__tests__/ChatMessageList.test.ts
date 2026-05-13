@@ -15,6 +15,7 @@ const baseMessage: ChatMessage = {
   metadata: '{}',
   traceId: null,
   citations: [],
+  graphPaths: [],
   toolCalls: [],
   createdAt: '2026-05-11T15:47:05.485Z',
 }
@@ -25,6 +26,7 @@ const completedStream: ChatStreamState = {
   content: '正式助手回复',
   seenEventIds: ['done-1'],
   citations: [],
+  graphPaths: [],
   toolInvocations: [],
   workflowSteps: [],
   error: null,

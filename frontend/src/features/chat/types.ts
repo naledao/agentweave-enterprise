@@ -27,6 +27,7 @@ export interface ChatMessage {
   metadata?: string | null
   traceId?: string | null
   citations: Citation[]
+  graphPaths: GraphPath[]
   toolCalls: ToolInvocation[]
   createdAt: string
 }
@@ -67,7 +68,7 @@ export interface SendMessageResponse {
   answer?: string
   retrievalMode?: 'VECTOR_ONLY' | 'GRAPH_ONLY' | 'HYBRID'
   citations?: Citation[]
-  graphPaths?: unknown[]
+  graphPaths?: GraphPath[]
 }
 
 export interface CancelMessageResponse {
@@ -85,6 +86,15 @@ export interface Citation {
   source?: string
   snippet: string
   score?: number
+}
+
+export interface GraphPath {
+  pathId?: string
+  depth: number
+  entities: string[]
+  relationships: string[]
+  sourceChunkIds: string[]
+  confidence?: number
 }
 
 export interface ToolInvocation {
@@ -109,6 +119,7 @@ export type ChatStreamEvent =
   | StreamToolCallStartedEvent
   | StreamToolCallFinishedEvent
   | StreamCitationEvent
+  | StreamGraphPathEvent
   | StreamWorkflowStepEvent
   | StreamDoneEvent
   | StreamErrorEvent
@@ -120,6 +131,7 @@ export interface StreamBaseEvent {
   messageId?: string
   traceId?: string
   timestamp?: string
+  createdAt?: string
 }
 
 export interface StreamMessageDeltaEvent extends StreamBaseEvent {
@@ -151,6 +163,11 @@ export interface StreamCitationEvent extends StreamBaseEvent {
   title: string
   snippet: string
   score?: number
+}
+
+export interface StreamGraphPathEvent extends StreamBaseEvent {
+  type: 'graph_path'
+  graphPath: GraphPath
 }
 
 export interface StreamWorkflowStepEvent extends StreamBaseEvent {
@@ -192,6 +209,15 @@ interface LegacyWorkflowStep {
   summary?: string
 }
 
+interface LegacyGraphPath {
+  pathId?: string
+  depth?: number
+  entities?: unknown[]
+  relationships?: unknown[]
+  sourceChunkIds?: unknown[]
+  confidence?: number
+}
+
 export type LegacyChatStreamEvent =
   | { type: 'message_delta'; content: string }
   | { type: 'tool_call_started'; invocationId: string; toolName: string; inputSummary?: string }
@@ -205,6 +231,7 @@ export type LegacyChatStreamEvent =
       latencyMs?: number
     }
   | { type: 'citation'; citation: LegacyCitation }
+  | { type: 'graph_path'; graphPath: LegacyGraphPath }
   | { type: 'workflow_step'; step: LegacyWorkflowStep }
   | { type: 'done'; messageId: string }
   | { type: 'error'; code: string; message: string; traceId?: string }
@@ -215,6 +242,7 @@ export interface ChatStreamState {
   content: string
   seenEventIds: string[]
   citations: Citation[]
+  graphPaths: GraphPath[]
   toolInvocations: ToolInvocation[]
   workflowSteps: WorkflowStep[]
   error: {

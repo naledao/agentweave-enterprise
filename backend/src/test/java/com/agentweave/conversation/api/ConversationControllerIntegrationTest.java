@@ -31,6 +31,7 @@ import com.agentweave.conversation.application.ConversationStreamService;
 import com.agentweave.conversation.repository.ConversationMessageRepository;
 import com.agentweave.conversation.repository.ModelCallLogRepository;
 import com.agentweave.graphrag.application.GraphRagRetrievalService;
+import com.agentweave.graphrag.dto.GraphPathResponse;
 import com.agentweave.graphrag.dto.GraphRagRetrievalResponse;
 import com.agentweave.shared.security.AuthenticatedUser;
 import com.agentweave.shared.security.CurrentUser;
@@ -621,6 +622,13 @@ class ConversationControllerIntegrationTest {
         String traceId = "trace-stream-success";
         String documentId = UUID.randomUUID().toString();
         String chunkId = UUID.randomUUID().toString();
+        GraphPathResponse graphPath = new GraphPathResponse(
+                "path-api-timeout",
+                2,
+                List.of("api-gateway", "order-service", "database"),
+                List.of("CALLS", "DEPENDS_ON"),
+                List.of(chunkId),
+                0.78);
         when(vectorStore.similaritySearch(any(SearchRequest.class)))
                 .thenReturn(List.of(Document.builder()
                         .id(chunkId)
@@ -635,6 +643,14 @@ class ConversationControllerIntegrationTest {
                                 "permissionLevel", "INTERNAL"))
                         .score(0.88)
                         .build()));
+        when(graphRagRetrievalService.retrieve(any(), any()))
+                .thenReturn(new GraphRagRetrievalResponse(
+                        List.of(graphPath),
+                        List.of("api-gateway", "order-service", "database"),
+                        List.of(chunkId),
+                        "count=1,max=0.78",
+                        1,
+                        0));
         AtomicReference<String> modelTraceId = new AtomicReference<>();
         AtomicReference<String> modelConversationId = new AtomicReference<>();
         AtomicReference<String> modelMessageId = new AtomicReference<>();
@@ -667,11 +683,20 @@ class ConversationControllerIntegrationTest {
                 .andExpect(content().string(containsString("\"messageId\"")))
                 .andExpect(content().string(containsString("\"traceId\":\"" + traceId + "\"")))
                 .andExpect(content().string(containsString("\"timestamp\"")))
+                .andExpect(content().string(containsString("\"createdAt\"")))
                 .andExpect(content().string(containsString("event:citation")))
                 .andExpect(content().string(containsString("\"documentId\":\"" + documentId + "\"")))
                 .andExpect(content().string(containsString("\"documentName\":\"api-status-runbook\"")))
                 .andExpect(content().string(containsString("\"chunkId\":\"" + chunkId + "\"")))
                 .andExpect(content().string(containsString("\"source\":\"runbook\"")))
+                .andExpect(content().string(containsString("event:graph_path")))
+                .andExpect(content().string(containsString("\"graphPath\"")))
+                .andExpect(content().string(containsString("\"pathId\":\"path-api-timeout\"")))
+                .andExpect(content().string(containsString("\"depth\":2")))
+                .andExpect(content().string(containsString("\"entities\":[\"api-gateway\",\"order-service\",\"database\"]")))
+                .andExpect(content().string(containsString("\"relationships\":[\"CALLS\",\"DEPENDS_ON\"]")))
+                .andExpect(content().string(containsString("\"sourceChunkIds\":[\"" + chunkId + "\"]")))
+                .andExpect(content().string(containsString("\"confidence\":0.78")))
                 .andExpect(content().string(containsString("event:message_delta")))
                 .andExpect(content().string(containsString("\"delta\":\"MiMo-V2.5 test answer.\"")))
                 .andExpect(content().string(containsString("MiMo-V2.5 test answer.")))
@@ -689,6 +714,8 @@ class ConversationControllerIntegrationTest {
                 .andExpect(jsonPath("$.messages[1].status").value("SUCCEEDED"))
                 .andExpect(jsonPath("$.messages[1].citations[0].documentId").value(documentId))
                 .andExpect(jsonPath("$.messages[1].citations[0].chunkId").value(chunkId))
+                .andExpect(jsonPath("$.messages[1].graphPaths[0].pathId").value("path-api-timeout"))
+                .andExpect(jsonPath("$.messages[1].graphPaths[0].sourceChunkIds[0]").value(chunkId))
                 .andExpect(jsonPath("$.messages[1].metadata", containsString(documentId)));
 
         ModelCallLogEntity log = modelCallLogRepository
@@ -704,7 +731,9 @@ class ConversationControllerIntegrationTest {
         assertThat(modelMessageId.get()).isNotBlank();
         assertThat(modelPrompt.get().ragContext().promptContext())
                 .contains(documentId)
-                .contains(chunkId);
+                .contains(chunkId)
+                .contains("path-api-timeout")
+                .contains("api-gateway -> order-service -> database");
     }
 
     @Test

@@ -121,7 +121,7 @@ function parseSseChunk(chunk: string): ChatStreamEvent | null {
   return normalizeStreamEvent(eventType, JSON.parse(data) as Record<string, unknown>)
 }
 
-function normalizeStreamEvent(eventType: string, data: Record<string, unknown>): ChatStreamEvent | null {
+export function normalizeStreamEvent(eventType: string, data: Record<string, unknown>): ChatStreamEvent | null {
   const typed = { type: eventType, ...data } as ChatStreamEvent | LegacyChatStreamEvent
   switch (typed.type) {
     case 'message_delta':
@@ -161,6 +161,21 @@ function normalizeStreamEvent(eventType: string, data: Record<string, unknown>):
         score: optionalNumberField(citation.score),
       }
     }
+    case 'graph_path': {
+      const graphPath = isRecord(data.graphPath) ? data.graphPath : data
+      return {
+        ...baseFields(data),
+        type: 'graph_path',
+        graphPath: {
+          pathId: optionalStringField(graphPath.pathId),
+          depth: numberField(graphPath.depth),
+          entities: stringArrayField(graphPath.entities),
+          relationships: stringArrayField(graphPath.relationships),
+          sourceChunkIds: stringArrayField(graphPath.sourceChunkIds),
+          confidence: optionalNumberField(graphPath.confidence),
+        },
+      }
+    }
     case 'workflow_step': {
       const step = isRecord(data.step) ? data.step : data
       return {
@@ -197,6 +212,7 @@ function baseFields(data: Record<string, unknown>) {
     messageId: optionalStringField(data.messageId),
     traceId: optionalStringField(data.traceId),
     timestamp: optionalStringField(data.timestamp),
+    createdAt: optionalStringField(data.createdAt ?? data.timestamp),
   }
 }
 
@@ -220,6 +236,14 @@ function optionalStringField(value: unknown): string | undefined {
 
 function optionalNumberField(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined
+}
+
+function numberField(value: unknown): number {
+  return typeof value === 'number' ? value : 0
+}
+
+function stringArrayField(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

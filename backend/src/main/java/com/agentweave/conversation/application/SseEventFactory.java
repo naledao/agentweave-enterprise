@@ -3,6 +3,7 @@ package com.agentweave.conversation.application;
 import com.agentweave.conversation.dto.CitationEventResponse;
 import com.agentweave.conversation.dto.SseEventPayload;
 import com.agentweave.conversation.dto.WorkflowStepEventResponse;
+import com.agentweave.graphrag.dto.GraphPathResponse;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.http.codec.ServerSentEvent;
@@ -75,6 +76,18 @@ public class SseEventFactory {
                 .build();
     }
 
+    public ServerSentEvent<SseEventPayload> graphPath(
+            UUID conversationId,
+            UUID messageId,
+            GraphPathResponse graphPath,
+            String traceId) {
+        return ServerSentEvent.builder(base(conversationId, messageId, traceId, null)
+                        .graphPath(graphPath)
+                        .build())
+                .event("graph_path")
+                .build();
+    }
+
     public ServerSentEvent<SseEventPayload> workflowStep(
             UUID conversationId,
             UUID messageId,
@@ -131,6 +144,7 @@ public class SseEventFactory {
         private UUID messageId;
         private String traceId;
         private Instant timestamp;
+        private Instant createdAt;
         private String delta;
         private String toolCallId;
         private String toolName;
@@ -149,6 +163,7 @@ public class SseEventFactory {
         private String stepName;
         private String code;
         private String message;
+        private GraphPathResponse graphPath;
 
         SseEventPayloadBuilder eventId(String eventId) {
             this.eventId = eventId;
@@ -172,6 +187,7 @@ public class SseEventFactory {
 
         SseEventPayloadBuilder timestamp(Instant timestamp) {
             this.timestamp = timestamp;
+            this.createdAt = timestamp;
             return this;
         }
 
@@ -265,6 +281,11 @@ public class SseEventFactory {
             return this;
         }
 
+        SseEventPayloadBuilder graphPath(GraphPathResponse graphPath) {
+            this.graphPath = graphPath;
+            return this;
+        }
+
         SseEventPayload build() {
             return new SseEventPayload(
                     eventId,
@@ -272,6 +293,7 @@ public class SseEventFactory {
                     messageId,
                     traceId,
                     timestamp,
+                    createdAt,
                     delta,
                     toolCallId,
                     toolName,
@@ -289,7 +311,8 @@ public class SseEventFactory {
                     workflowRunId,
                     stepName,
                     code,
-                    message);
+                    message,
+                    graphPath);
         }
     }
 }
