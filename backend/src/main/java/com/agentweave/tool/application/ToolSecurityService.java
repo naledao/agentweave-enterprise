@@ -9,6 +9,7 @@ import com.agentweave.shared.exception.ToolPermissionDeniedException;
 import com.agentweave.shared.security.CurrentUser;
 import com.agentweave.shared.security.CurrentUserService;
 import com.agentweave.tool.domain.ToolDefinitionEntity;
+import com.agentweave.tool.domain.ToolInvocationEntity;
 import com.agentweave.tool.domain.ToolRiskLevel;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -42,6 +43,7 @@ public class ToolSecurityService implements DisposableBean {
     private final ToolInvocationRateLimiter rateLimiter;
     private final ToolSecurityProperties properties;
     private final AuditLogService auditLogService;
+    private final ToolInvocationService toolInvocationService;
     private final Validator validator;
     private final ExecutorService executor;
 
@@ -53,6 +55,7 @@ public class ToolSecurityService implements DisposableBean {
             ToolInvocationRateLimiter rateLimiter,
             ToolSecurityProperties properties,
             AuditLogService auditLogService,
+            ToolInvocationService toolInvocationService,
             Validator validator) {
         this.currentUserService = currentUserService;
         this.toolDefinitionService = toolDefinitionService;
@@ -60,6 +63,7 @@ public class ToolSecurityService implements DisposableBean {
         this.rateLimiter = rateLimiter;
         this.properties = properties;
         this.auditLogService = auditLogService;
+        this.toolInvocationService = toolInvocationService;
         this.validator = validator;
         this.executor = Executors.newCachedThreadPool();
     }
@@ -71,6 +75,7 @@ public class ToolSecurityService implements DisposableBean {
             ToolInvocationRateLimiter rateLimiter,
             ToolSecurityProperties properties,
             AuditLogService auditLogService,
+            ToolInvocationService toolInvocationService,
             Validator validator,
             ExecutorService executor) {
         this.currentUserService = currentUserService;
@@ -79,6 +84,7 @@ public class ToolSecurityService implements DisposableBean {
         this.rateLimiter = rateLimiter;
         this.properties = properties;
         this.auditLogService = auditLogService;
+        this.toolInvocationService = toolInvocationService;
         this.validator = validator;
         this.executor = executor;
     }
@@ -86,17 +92,8 @@ public class ToolSecurityService implements DisposableBean {
     @Transactional(readOnly = true)
     public CurrentUser authorize(String permissionCode) {
         CurrentUser user = currentUserService.requireCurrentUser();
-        ToolDefinitionEntity definition = toolDefinitionService.findByPermissionCode(permissionCode)
-                .orElseThrow(() -> deny(user, permissionCode, "Tool is not whitelisted"));
-        if (!definition.isEnabled()) {
-            throw deny(user, definition.getPermissionCode(), "Tool is disabled");
-        }
-        if (definition.getRiskLevel() == ToolRiskLevel.HIGH && !user.hasRole("ADMIN")) {
-            throw deny(user, definition.getPermissionCode(), "High risk tool requires administrator role");
-        }
-        if (!canInvokeTool(user, definition.getPermissionCode())) {
-            throw deny(user, definition.getPermissionCode(), "Missing tool permission");
-        }
+        ToolDefinitionEntity definition = requireDefinition(user, permissionCode);
+        authorizeDefinition(user, definition);
         return user;
     }
 
@@ -106,10 +103,50 @@ public class ToolSecurityService implements DisposableBean {
             Method method,
             Object[] arguments,
             ToolInvocationCallback invocation) throws Throwable {
-        CurrentUser user = authorize(permissionCode);
-        validateArguments(user, permissionCode, target, method, arguments);
-        requireRateLimit(user, permissionCode);
-        return executeWithTimeout(permissionCode, invocation);
+        CurrentUser user = currentUserService.requireCurrentUser();
+        ToolDefinitionEntity definition = toolDefinitionService.findByPermissionCode(permissionCode)
+                .orElse(null);
+        String toolCode = definition == null ? permissionCode : definition.getCode();
+        ToolInvocationEntity invocationRecord = toolInvocationService.start(toolCode, user, method, arguments);
+        if (definition == null) {
+            ToolPermissionDeniedException ex = deny(user, permissionCode, "Tool is not whitelisted");
+            toolInvocationService.markDenied(invocationRecord.getId(), ex.getMessage());
+            throw ex;
+        }
+        try {
+            authorizeDefinition(user, definition);
+            validateArguments(user, definition.getPermissionCode(), target, method, arguments);
+            requireRateLimit(user, definition.getPermissionCode());
+            Object result = executeWithTimeout(definition.getPermissionCode(), invocation);
+            toolInvocationService.markSuccess(invocationRecord.getId(), result);
+            return result;
+        } catch (ToolExecutionTimeoutException ex) {
+            toolInvocationService.markTimeout(invocationRecord.getId(), ex);
+            throw ex;
+        } catch (ToolPermissionDeniedException | TooManyRequestsException | ConstraintViolationException ex) {
+            toolInvocationService.markDenied(invocationRecord.getId(), ex.getMessage());
+            throw ex;
+        } catch (Throwable ex) {
+            toolInvocationService.markFailure(invocationRecord.getId(), ex);
+            throw ex;
+        }
+    }
+
+    private ToolDefinitionEntity requireDefinition(CurrentUser user, String permissionCode) {
+        return toolDefinitionService.findByPermissionCode(permissionCode)
+                .orElseThrow(() -> deny(user, permissionCode, "Tool is not whitelisted"));
+    }
+
+    private void authorizeDefinition(CurrentUser user, ToolDefinitionEntity definition) {
+        if (!definition.isEnabled()) {
+            throw deny(user, definition.getPermissionCode(), "Tool is disabled");
+        }
+        if (definition.getRiskLevel() == ToolRiskLevel.HIGH && !user.hasRole("ADMIN")) {
+            throw deny(user, definition.getPermissionCode(), "High risk tool requires administrator role");
+        }
+        if (!canInvokeTool(user, definition.getPermissionCode())) {
+            throw deny(user, definition.getPermissionCode(), "Missing tool permission");
+        }
     }
 
     private void requireRateLimit(CurrentUser user, String permissionCode) {

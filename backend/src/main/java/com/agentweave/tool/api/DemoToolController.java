@@ -55,4 +55,11 @@ public class DemoToolController {
                 "slow-ticket-query",
                 Map.of("ticketNo", ticketNo, "title", "Slow demo ticket", "state", "OPEN"));
     }
+
+    @GetMapping("/failing-ticket")
+    @RequireToolPermission("tool:ticket:query")
+    public ToolExecutionResponse queryFailingTicket(
+            @RequestParam(defaultValue = "INC-10001") @NotBlank @Size(max = 64) String ticketNo) {
+        throw new IllegalStateException("demo ticket tool failure: " + ticketNo);
+    }
 }

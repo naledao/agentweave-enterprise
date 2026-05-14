@@ -18,8 +18,11 @@ import com.agentweave.auth.repository.UserRepository;
 import com.agentweave.shared.audit.AuditEventType;
 import com.agentweave.shared.audit.AuditLogRepository;
 import com.agentweave.tool.domain.ToolDefinitionEntity;
+import com.agentweave.tool.domain.ToolInvocationEntity;
+import com.agentweave.tool.domain.ToolInvocationStatus;
 import com.agentweave.tool.domain.ToolRiskLevel;
 import com.agentweave.tool.repository.ToolDefinitionRepository;
+import com.agentweave.tool.repository.ToolInvocationRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +66,9 @@ class ToolDefinitionControllerIntegrationTest {
 
     @Autowired
     private ToolDefinitionRepository toolDefinitionRepository;
+
+    @Autowired
+    private ToolInvocationRepository toolInvocationRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -225,6 +231,14 @@ class ToolDefinitionControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.toolName").value("ticket-query"))
                 .andExpect(jsonPath("$.result.ticketNo").value("INC-10001"));
+
+        ToolInvocationEntity invocation = latestInvocation("trace-tool-allowed");
+        assertThat(invocation.getToolCode()).isEqualTo("ticket.query");
+        assertThat(invocation.getUsername()).isEqualTo(userUsername);
+        assertThat(invocation.getStatus()).isEqualTo(ToolInvocationStatus.SUCCESS);
+        assertThat(invocation.getDurationMs()).isNotNull();
+        assertThat(invocation.getResultSummary()).contains("ticket-query");
+        assertThat(invocation.getErrorMessage()).isNull();
     }
 
     @Test
@@ -239,6 +253,12 @@ class ToolDefinitionControllerIntegrationTest {
 
         assertThat(auditLogRepository.countByEventTypeAndUsername(
                 AuditEventType.TOOL_PERMISSION_DENIED, userUsername)).isEqualTo(1);
+
+        ToolInvocationEntity invocation = latestInvocation("trace-tool-denied");
+        assertThat(invocation.getToolCode()).isEqualTo("endpoint.status");
+        assertThat(invocation.getUsername()).isEqualTo(userUsername);
+        assertThat(invocation.getStatus()).isEqualTo(ToolInvocationStatus.DENIED);
+        assertThat(invocation.getErrorMessage()).isEqualTo("Missing tool permission");
     }
 
     @Test
@@ -318,6 +338,122 @@ class ToolDefinitionControllerIntegrationTest {
                 .andExpect(status().isGatewayTimeout())
                 .andExpect(jsonPath("$.code").value("TOOL_408"))
                 .andExpect(jsonPath("$.traceId").value("trace-tool-timeout"));
+
+        ToolInvocationEntity invocation = latestInvocation("trace-tool-timeout");
+        assertThat(invocation.getToolCode()).isEqualTo("ticket.query");
+        assertThat(invocation.getStatus()).isEqualTo(ToolInvocationStatus.TIMEOUT);
+        assertThat(invocation.getErrorMessage()).contains("tool execution timeout");
+        assertThat(invocation.getFinishedAt()).isNotNull();
+    }
+
+    @Test
+    void failedToolInvocationWritesErrorSummary() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String failureUsername = "tool_failure_" + suffix;
+        String failureToken = createUserWithPermissions(
+                failureUsername,
+                "password123",
+                "TOOL_FAILURE_" + suffix.toUpperCase(),
+                List.of(ensurePermission("tool:ticket:query", "Query tickets", PermissionType.TOOL)));
+
+        mockMvc.perform(get("/api/v1/tools/demo/failing-ticket")
+                        .param("ticketNo", "INC-FAILED")
+                        .header("Authorization", "Bearer " + failureToken)
+                        .header("X-Trace-Id", "trace-tool-failure"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("COMMON_001"))
+                .andExpect(jsonPath("$.traceId").value("trace-tool-failure"));
+
+        ToolInvocationEntity invocation = latestInvocation("trace-tool-failure");
+        assertThat(invocation.getToolCode()).isEqualTo("ticket.query");
+        assertThat(invocation.getUsername()).isEqualTo(failureUsername);
+        assertThat(invocation.getStatus()).isEqualTo(ToolInvocationStatus.FAILED);
+        assertThat(invocation.getErrorMessage()).contains("demo ticket tool failure");
+        assertThat(invocation.getFinishedAt()).isNotNull();
+    }
+
+    @Test
+    void listToolInvocationsReturnsOnlyCurrentUsersRecords() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String firstUsername = "tool_list_a_" + suffix;
+        String secondUsername = "tool_list_b_" + suffix;
+        PermissionEntity ticketPermission = ensurePermission("tool:ticket:query", "Query tickets", PermissionType.TOOL);
+        String firstToken = createUserWithPermissions(
+                firstUsername,
+                "password123",
+                "TOOL_LIST_A_" + suffix.toUpperCase(),
+                List.of(ticketPermission));
+        String secondToken = createUserWithPermissions(
+                secondUsername,
+                "password123",
+                "TOOL_LIST_B_" + suffix.toUpperCase(),
+                List.of(ticketPermission));
+
+        mockMvc.perform(get("/api/v1/tools/demo/tickets")
+                        .header("Authorization", "Bearer " + firstToken)
+                        .header("X-Trace-Id", "trace-tool-list-first"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/tools/demo/tickets")
+                        .header("Authorization", "Bearer " + secondToken)
+                        .header("X-Trace-Id", "trace-tool-list-second"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/tools/invocations")
+                        .param("toolCode", "ticket.query")
+                        .param("status", "success")
+                        .header("Authorization", "Bearer " + firstToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.traceId == 'trace-tool-list-first')].username")
+                        .value(org.hamcrest.Matchers.hasItem(firstUsername)))
+                .andExpect(jsonPath("$.items[?(@.traceId == 'trace-tool-list-second')]").isEmpty());
+    }
+
+    @Test
+    void getToolInvocationRequiresOwnerOrAdmin() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String ownerUsername = "tool_detail_owner_" + suffix;
+        String otherUsername = "tool_detail_other_" + suffix;
+        String platformAdminUsername = "tool_detail_admin_" + suffix;
+        PermissionEntity ticketPermission = ensurePermission("tool:ticket:query", "Query tickets", PermissionType.TOOL);
+        String ownerToken = createUserWithPermissions(
+                ownerUsername,
+                "password123",
+                "TOOL_DETAIL_OWNER_" + suffix.toUpperCase(),
+                List.of(ticketPermission));
+        String otherToken = createUserWithPermissions(
+                otherUsername,
+                "password123",
+                "TOOL_DETAIL_OTHER_" + suffix.toUpperCase(),
+                List.of(ticketPermission));
+        String platformAdminToken = createUserWithRoles(
+                platformAdminUsername,
+                "password123",
+                List.of(roleRepository.findByCode("ADMIN").orElseThrow()));
+
+        mockMvc.perform(get("/api/v1/tools/demo/tickets")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .header("X-Trace-Id", "trace-tool-detail-owner"))
+                .andExpect(status().isOk());
+        UUID invocationId = latestInvocation("trace-tool-detail-owner").getId();
+
+        mockMvc.perform(get("/api/v1/tools/invocations/{invocationId}", invocationId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(invocationId.toString()))
+                .andExpect(jsonPath("$.toolCode").value("ticket.query"))
+                .andExpect(jsonPath("$.username").value(ownerUsername))
+                .andExpect(jsonPath("$.status").value("success"))
+                .andExpect(jsonPath("$.traceId").value("trace-tool-detail-owner"));
+
+        mockMvc.perform(get("/api/v1/tools/invocations/{invocationId}", invocationId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("COMMON_404"));
+
+        mockMvc.perform(get("/api/v1/tools/invocations/{invocationId}", invocationId)
+                        .header("Authorization", "Bearer " + platformAdminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(invocationId.toString()));
     }
 
     private PermissionEntity ensurePermission(String code, String name, PermissionType type) {
@@ -389,6 +525,21 @@ class ToolDefinitionControllerIntegrationTest {
         return login(username, password);
     }
 
+    private String createUserWithRoles(
+            String username,
+            String password,
+            List<RoleEntity> roles) throws Exception {
+        UserEntity user = new UserEntity(
+                UUID.randomUUID(),
+                username,
+                username,
+                passwordEncoder.encode(password),
+                username + "@example.com");
+        user.replaceRoles(roles);
+        userRepository.save(user);
+        return login(username, password);
+    }
+
     private String login(String username, String password) throws Exception {
         String body = objectMapper.writeValueAsString(new LoginPayload(username, password));
         MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
@@ -398,6 +549,11 @@ class ToolDefinitionControllerIntegrationTest {
                 .andExpect(jsonPath("$.accessToken").isString())
                 .andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString()).get("accessToken").asText();
+    }
+
+    private ToolInvocationEntity latestInvocation(String traceId) {
+        return toolInvocationRepository.findFirstByTraceIdOrderByCreatedAtDesc(traceId)
+                .orElseThrow();
     }
 
     private record LoginPayload(String username, String password) {
