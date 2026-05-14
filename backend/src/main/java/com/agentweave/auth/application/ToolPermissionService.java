@@ -7,6 +7,7 @@ import com.agentweave.shared.exception.AccessDeniedBusinessException;
 import com.agentweave.shared.exception.ResourceNotFoundException;
 import com.agentweave.shared.security.CurrentUser;
 import com.agentweave.shared.security.CurrentUserService;
+import com.agentweave.tool.application.ToolDefinitionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -20,14 +21,17 @@ public class ToolPermissionService {
     private final CurrentUserService currentUserService;
     private final PermissionRepository permissionRepository;
     private final AuditLogService auditLogService;
+    private final ToolDefinitionService toolDefinitionService;
 
     public ToolPermissionService(
             CurrentUserService currentUserService,
             PermissionRepository permissionRepository,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            ToolDefinitionService toolDefinitionService) {
         this.currentUserService = currentUserService;
         this.permissionRepository = permissionRepository;
         this.auditLogService = auditLogService;
+        this.toolDefinitionService = toolDefinitionService;
     }
 
     @Transactional(readOnly = true)
@@ -43,6 +47,7 @@ public class ToolPermissionService {
     @Transactional(readOnly = true)
     public void requireToolPermission(String permissionCode) {
         CurrentUser user = currentUserService.requireCurrentUser();
+        toolDefinitionService.requireEnabledToolForPermission(permissionCode);
         if (!canInvokeTool(user, permissionCode)) {
             log.warn("Tool permission denied: user={}, permission={}", user.username(), permissionCode);
             auditLogService.recordToolPermissionDenied(user, permissionCode);

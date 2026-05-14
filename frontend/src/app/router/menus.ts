@@ -1,4 +1,4 @@
-import { ChatLineRound, Collection, Lock, MessageBox, User } from '@element-plus/icons-vue'
+import { ChatLineRound, Collection, Lock, MessageBox, Tools, User } from '@element-plus/icons-vue'
 import type { Component } from 'vue'
 
 export interface AppMenu {
@@ -30,6 +30,13 @@ export const appMenus: AppMenu[] = [
     title: '知识库文档',
     permissions: [],
     icon: Collection,
+  },
+  {
+    key: 'tools',
+    path: '/app/tools',
+    title: '工具中心',
+    permissions: [],
+    icon: Tools,
   },
   {
     key: 'users',

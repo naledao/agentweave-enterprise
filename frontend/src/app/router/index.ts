@@ -58,6 +58,12 @@ export const router = createRouter({
           meta: { requiresAuth: true, title: '文档详情' },
         },
         {
+          path: 'tools',
+          name: 'Tools',
+          component: () => import('@/features/tools/views/ToolCenterView.vue'),
+          meta: { requiresAuth: true, title: '工具中心' },
+        },
+        {
           path: 'settings/users',
           name: 'Users',
           component: () => import('@/features/settings/views/UserManagementView.vue'),
