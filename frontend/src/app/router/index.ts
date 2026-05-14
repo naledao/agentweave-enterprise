@@ -64,6 +64,12 @@ export const router = createRouter({
           meta: { requiresAuth: true, title: '工具中心' },
         },
         {
+          path: 'tools/invocations',
+          name: 'ToolInvocations',
+          component: () => import('@/features/tools/views/ToolInvocationsView.vue'),
+          meta: { requiresAuth: true, title: '工具调用记录' },
+        },
+        {
           path: 'settings/users',
           name: 'Users',
           component: () => import('@/features/settings/views/UserManagementView.vue'),

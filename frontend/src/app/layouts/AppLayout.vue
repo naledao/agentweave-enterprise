@@ -65,7 +65,7 @@ import { useAuthStore } from '@/features/auth/store/useAuthStore'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const fixedMainRoutes = ['Chat', 'KnowledgeDocuments', 'Roles', 'Tools']
+const fixedMainRoutes = ['Chat', 'KnowledgeDocuments', 'Roles', 'Tools', 'ToolInvocations']
 
 const activePath = computed(() => route.path)
 const routeTitle = computed(() => route.meta.title ?? '工作台')
