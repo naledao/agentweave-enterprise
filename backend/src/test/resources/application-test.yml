@@ -30,6 +30,10 @@ agentweave:
   chat:
     stream-timeout: 120s
     max-concurrent-streams-per-user: 1
+  tool:
+    security:
+      max-invocations-per-minute: 60
+      execution-timeout: 5s
   knowledge:
     chunking:
       chunk-size: 1000

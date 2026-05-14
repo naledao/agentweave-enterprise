@@ -8,6 +8,7 @@ import com.agentweave.tool.domain.ToolDefinitionEntity;
 import com.agentweave.tool.dto.ToolDefinitionResponse;
 import com.agentweave.tool.repository.ToolDefinitionRepository;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,11 +34,17 @@ public class ToolDefinitionService {
     }
 
     @Transactional(readOnly = true)
-    public void requireEnabledToolForPermission(String permissionCode) {
-        ToolDefinitionEntity definition = toolDefinitionRepository.findByPermissionCode(permissionCode)
+    public Optional<ToolDefinitionEntity> findByPermissionCode(String permissionCode) {
+        return toolDefinitionRepository.findByPermissionCode(permissionCode);
+    }
+
+    @Transactional(readOnly = true)
+    public ToolDefinitionEntity requireEnabledToolForPermission(String permissionCode) {
+        ToolDefinitionEntity definition = findByPermissionCode(permissionCode)
                 .orElseThrow(() -> new ResourceNotFoundException("tool definition not found"));
         if (!definition.isEnabled()) {
             throw new AccessDeniedBusinessException("tool is disabled");
         }
+        return definition;
     }
 }

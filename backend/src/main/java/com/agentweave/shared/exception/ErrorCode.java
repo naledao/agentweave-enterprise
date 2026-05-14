@@ -9,6 +9,7 @@ public enum ErrorCode {
     RESOURCE_NOT_FOUND("COMMON_404", "Resource not found"),
     VALIDATION_FAILED("COMMON_400", "Validation failed"),
     TOO_MANY_REQUESTS("COMMON_429", "Too many requests"),
+    TOOL_TIMEOUT("TOOL_408", "Tool execution timeout"),
     BUSINESS_ERROR("COMMON_001", "Business error");
 
     private final String code;

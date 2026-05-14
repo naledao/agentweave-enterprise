@@ -68,8 +68,13 @@ public class AuditLogService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordToolPermissionDenied(CurrentUser user, String permissionCode) {
+        recordToolInvocationDenied(user, permissionCode, "Missing tool permission");
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordToolInvocationDenied(CurrentUser user, String permissionCode, String reason) {
         save(AuditEventType.TOOL_PERMISSION_DENIED, user.id(), user.username(), "TOOL",
-                permissionCode, "INVOKE_TOOL", AuditResult.DENIED, "Missing tool permission");
+                permissionCode, "INVOKE_TOOL", AuditResult.DENIED, truncateReason(reason));
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -213,6 +218,13 @@ public class AuditLogService {
             return traceIdProvider.currentTraceId();
         }
         return traceIdProvider.currentTraceId(request);
+    }
+
+    private String truncateReason(String reason) {
+        if (reason == null || reason.length() <= 500) {
+            return reason;
+        }
+        return reason.substring(0, 500);
     }
 
     private String ipAddress(HttpServletRequest request) {

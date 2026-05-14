@@ -99,6 +99,10 @@ public class ToolDefinitionEntity {
         return riskLevel;
     }
 
+    public void setRiskLevel(ToolRiskLevel riskLevel) {
+        this.riskLevel = riskLevel;
+    }
+
     public boolean isEnabled() {
         return enabled;
     }

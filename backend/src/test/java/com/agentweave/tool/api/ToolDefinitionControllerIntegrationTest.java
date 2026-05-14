@@ -33,12 +33,17 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
 @SpringBootTest
+@TestPropertySource(properties = {
+        "agentweave.tool.security.max-invocations-per-minute=2",
+        "agentweave.tool.security.execution-timeout=100ms"
+})
 class ToolDefinitionControllerIntegrationTest {
 
     @Autowired
@@ -69,6 +74,7 @@ class ToolDefinitionControllerIntegrationTest {
     private String userToken;
     private String userUsername;
     private ToolDefinitionEntity disabledTool;
+    private ToolDefinitionEntity highRiskTool;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -88,7 +94,7 @@ class ToolDefinitionControllerIntegrationTest {
                 "tool:ticket:query",
                 ToolRiskLevel.LOW,
                 true);
-        ensureToolDefinition(
+        highRiskTool = ensureToolDefinition(
                 "endpoint.status",
                 "接口状态查询",
                 "tool:api-status:query",
@@ -208,7 +214,110 @@ class ToolDefinitionControllerIntegrationTest {
         }
 
         assertThat(auditLogRepository.countByEventTypeAndUsername(
-                AuditEventType.TOOL_PERMISSION_DENIED, userUsername)).isZero();
+                AuditEventType.TOOL_PERMISSION_DENIED, userUsername)).isEqualTo(1);
+    }
+
+    @Test
+    void userWithPermissionCanInvokeTool() throws Exception {
+        mockMvc.perform(get("/api/v1/tools/demo/tickets")
+                        .header("Authorization", "Bearer " + userToken)
+                        .header("X-Trace-Id", "trace-tool-allowed"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.toolName").value("ticket-query"))
+                .andExpect(jsonPath("$.result.ticketNo").value("INC-10001"));
+    }
+
+    @Test
+    void userWithoutPermissionIsDeniedAndAudited() throws Exception {
+        mockMvc.perform(get("/api/v1/tools/demo/api-status")
+                        .header("Authorization", "Bearer " + userToken)
+                        .header("X-Trace-Id", "trace-tool-denied"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("AUTH_403"))
+                .andExpect(jsonPath("$.message").value("Missing tool permission"))
+                .andExpect(jsonPath("$.traceId").value("trace-tool-denied"));
+
+        assertThat(auditLogRepository.countByEventTypeAndUsername(
+                AuditEventType.TOOL_PERMISSION_DENIED, userUsername)).isEqualTo(1);
+    }
+
+    @Test
+    void highRiskToolRequiresAdminRole() throws Exception {
+        setRiskLevel(highRiskTool, ToolRiskLevel.HIGH);
+        try {
+            mockMvc.perform(get("/api/v1/tools/demo/api-status")
+                            .header("Authorization", "Bearer " + userToken)
+                            .header("X-Trace-Id", "trace-tool-high-risk"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("AUTH_403"))
+                    .andExpect(jsonPath("$.message").value("High risk tool requires administrator role"))
+                    .andExpect(jsonPath("$.traceId").value("trace-tool-high-risk"));
+        } finally {
+            setRiskLevel(highRiskTool, ToolRiskLevel.LOW);
+        }
+
+        assertThat(auditLogRepository.countByEventTypeAndUsername(
+                AuditEventType.TOOL_PERMISSION_DENIED, userUsername)).isEqualTo(1);
+    }
+
+    @Test
+    void invalidToolArgumentIsDeniedBeforeBusinessExecution() throws Exception {
+        mockMvc.perform(get("/api/v1/tools/demo/tickets")
+                        .param("ticketNo", " ")
+                        .header("Authorization", "Bearer " + userToken)
+                        .header("X-Trace-Id", "trace-tool-invalid-argument"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_400"))
+                .andExpect(jsonPath("$.traceId").value("trace-tool-invalid-argument"));
+
+        assertThat(auditLogRepository.countByEventTypeAndUsername(
+                AuditEventType.TOOL_PERMISSION_DENIED, userUsername)).isEqualTo(1);
+    }
+
+    @Test
+    void rateLimitedToolInvocationReturnsControlledError() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String rateLimitedUsername = "tool_rate_" + suffix;
+        String rateLimitedToken = createUserWithPermissions(
+                rateLimitedUsername,
+                "password123",
+                "TOOL_RATE_" + suffix.toUpperCase(),
+                List.of(ensurePermission("tool:ticket:query", "Query tickets", PermissionType.TOOL)));
+
+        for (int i = 0; i < 2; i++) {
+            mockMvc.perform(get("/api/v1/tools/demo/tickets")
+                            .header("Authorization", "Bearer " + rateLimitedToken))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(get("/api/v1/tools/demo/tickets")
+                        .header("Authorization", "Bearer " + rateLimitedToken)
+                        .header("X-Trace-Id", "trace-tool-rate-limit"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("COMMON_429"))
+                .andExpect(jsonPath("$.traceId").value("trace-tool-rate-limit"));
+
+        assertThat(auditLogRepository.countByEventTypeAndUsername(
+                AuditEventType.TOOL_PERMISSION_DENIED, rateLimitedUsername)).isEqualTo(1);
+    }
+
+    @Test
+    void timedOutToolInvocationReturnsControlledError() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String timeoutUsername = "tool_timeout_" + suffix;
+        String timeoutToken = createUserWithPermissions(
+                timeoutUsername,
+                "password123",
+                "TOOL_TIMEOUT_" + suffix.toUpperCase(),
+                List.of(ensurePermission("tool:ticket:query", "Query tickets", PermissionType.TOOL)));
+
+        mockMvc.perform(get("/api/v1/tools/demo/slow-ticket")
+                        .param("delayMs", "300")
+                        .header("Authorization", "Bearer " + timeoutToken)
+                        .header("X-Trace-Id", "trace-tool-timeout"))
+                .andExpect(status().isGatewayTimeout())
+                .andExpect(jsonPath("$.code").value("TOOL_408"))
+                .andExpect(jsonPath("$.traceId").value("trace-tool-timeout"));
     }
 
     private PermissionEntity ensurePermission(String code, String name, PermissionType type) {
@@ -224,7 +333,7 @@ class ToolDefinitionControllerIntegrationTest {
             ToolRiskLevel riskLevel,
             boolean enabled) {
         return toolDefinitionRepository.findByCode(code)
-                .map(definition -> setEnabled(definition, enabled))
+                .map(definition -> setEnabledAndRiskLevel(definition, enabled, riskLevel))
                 .orElseGet(() -> toolDefinitionRepository.save(new ToolDefinitionEntity(
                         UUID.randomUUID(),
                         code,
@@ -240,6 +349,44 @@ class ToolDefinitionControllerIntegrationTest {
     private ToolDefinitionEntity setEnabled(ToolDefinitionEntity definition, boolean enabled) {
         definition.setEnabled(enabled);
         return toolDefinitionRepository.save(definition);
+    }
+
+    private ToolDefinitionEntity setEnabledAndRiskLevel(
+            ToolDefinitionEntity definition,
+            boolean enabled,
+            ToolRiskLevel riskLevel) {
+        definition.setEnabled(enabled);
+        definition.setRiskLevel(riskLevel);
+        return toolDefinitionRepository.save(definition);
+    }
+
+    private ToolDefinitionEntity setRiskLevel(ToolDefinitionEntity definition, ToolRiskLevel riskLevel) {
+        definition.setRiskLevel(riskLevel);
+        return toolDefinitionRepository.save(definition);
+    }
+
+    private String createUserWithPermissions(
+            String username,
+            String password,
+            String roleCode,
+            List<PermissionEntity> permissions) throws Exception {
+        RoleEntity role = new RoleEntity(
+                UUID.randomUUID(),
+                roleCode,
+                "Tool Security Test Role",
+                null);
+        role.replacePermissions(permissions);
+        roleRepository.save(role);
+
+        UserEntity user = new UserEntity(
+                UUID.randomUUID(),
+                username,
+                username,
+                passwordEncoder.encode(password),
+                username + "@example.com");
+        user.replaceRoles(List.of(role));
+        userRepository.save(user);
+        return login(username, password);
     }
 
     private String login(String username, String password) throws Exception {

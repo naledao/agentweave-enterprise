@@ -1,9 +1,11 @@
 package com.agentweave.shared.security;
 
-import com.agentweave.auth.application.ToolPermissionService;
+import com.agentweave.tool.application.ToolSecurityService;
+import java.lang.reflect.Method;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -12,17 +14,28 @@ import org.springframework.stereotype.Component;
 @Component
 public class ToolPermissionAspect {
 
-    private final ToolPermissionService toolPermissionService;
+    private final ToolSecurityService toolSecurityService;
 
-    public ToolPermissionAspect(ToolPermissionService toolPermissionService) {
-        this.toolPermissionService = toolPermissionService;
+    public ToolPermissionAspect(ToolSecurityService toolSecurityService) {
+        this.toolSecurityService = toolSecurityService;
     }
 
     @Around("@annotation(requireToolPermission)")
     public Object requireToolPermission(
             ProceedingJoinPoint joinPoint,
             RequireToolPermission requireToolPermission) throws Throwable {
-        toolPermissionService.requireToolPermission(requireToolPermission.value());
-        return joinPoint.proceed();
+        Method method = resolveMethod(joinPoint);
+        return toolSecurityService.invoke(
+                requireToolPermission.value(),
+                joinPoint.getTarget(),
+                method,
+                joinPoint.getArgs(),
+                joinPoint::proceed);
+    }
+
+    private Method resolveMethod(ProceedingJoinPoint joinPoint) throws NoSuchMethodException {
+        Method signatureMethod = ((MethodSignature) joinPoint.getSignature()).getMethod();
+        return joinPoint.getTarget().getClass()
+                .getMethod(signatureMethod.getName(), signatureMethod.getParameterTypes());
     }
 }

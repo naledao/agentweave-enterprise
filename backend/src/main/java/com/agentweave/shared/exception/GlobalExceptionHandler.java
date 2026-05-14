@@ -40,8 +40,25 @@ public class GlobalExceptionHandler {
                     request.getRequestURI(),
                     request.getMethod(),
                     ex.getMessage());
+            return build(
+                    HttpStatus.FORBIDDEN,
+                    ErrorCode.ACCESS_DENIED,
+                    ErrorCode.ACCESS_DENIED.defaultMessage(),
+                    request);
         }
-        return build(HttpStatus.FORBIDDEN, ErrorCode.ACCESS_DENIED, ErrorCode.ACCESS_DENIED.defaultMessage(), request);
+        BusinessException businessException = (BusinessException) ex;
+        return build(
+                HttpStatus.FORBIDDEN,
+                businessException.getErrorCode(),
+                businessException.getMessage(),
+                request);
+    }
+
+    @ExceptionHandler(ToolExecutionTimeoutException.class)
+    public ResponseEntity<ApiErrorResponse> handleToolTimeout(
+            ToolExecutionTimeoutException ex,
+            HttpServletRequest request) {
+        return build(HttpStatus.GATEWAY_TIMEOUT, ex.getErrorCode(), ex.getMessage(), request);
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
