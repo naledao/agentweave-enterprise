@@ -126,6 +126,11 @@ export interface WorkflowRunQuery {
   status?: WorkflowRunStatus
 }
 
+export interface CreateWorkflowRunPayload {
+  conversationId?: string | null
+  goal: string
+}
+
 export interface WorkflowApprovalQuery {
   status?: WorkflowApprovalStatus
 }

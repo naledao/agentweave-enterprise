@@ -4,7 +4,14 @@
       title="工作流运行"
       description="查看 Agent 工作流执行路径、状态、耗时、错误摘要和 traceId。"
       eyebrow="Workflows"
-    />
+    >
+      <template #actions>
+        <el-button type="primary" @click="openCreateDialog">
+          <el-icon><Plus /></el-icon>
+          新建运行
+        </el-button>
+      </template>
+    </PageHeader>
 
     <el-alert
       v-if="listError.message"
@@ -63,27 +70,47 @@
         />
       </div>
     </div>
+
+    <WorkflowRunCreateDialog
+      v-model="createDialogVisible"
+      :error-message="createError.message"
+      :loading="createRunMutation.isPending.value"
+      :trace-id="createError.traceId"
+      @submit="createRun"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { Search } from '@element-plus/icons-vue'
-import { useQuery } from '@tanstack/vue-query'
+import { Plus, Search } from '@element-plus/icons-vue'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { ElMessage } from 'element-plus'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { workflowsApi } from '@/features/workflows/api/workflowsApi'
+import WorkflowRunCreateDialog from '@/features/workflows/components/WorkflowRunCreateDialog.vue'
 import WorkflowRunTable from '@/features/workflows/components/WorkflowRunTable.vue'
-import type { WorkflowRun, WorkflowRunStatus } from '@/features/workflows/types'
+import type {
+  CreateWorkflowRunPayload,
+  WorkflowRun,
+  WorkflowRunStatus,
+} from '@/features/workflows/types'
 import PageHeader from '@/shared/components/PageHeader.vue'
 import TraceIdText from '@/shared/components/TraceIdText.vue'
 import { getApiErrorDisplay } from '@/shared/utils/apiError'
 
 const router = useRouter()
+const queryClient = useQueryClient()
 const page = ref(1)
 const size = ref(20)
 const statusInput = ref<WorkflowRunStatus | ''>('')
 const appliedStatus = ref<WorkflowRunStatus | ''>('')
+const createDialogVisible = ref(false)
+const createError = ref<{ message: string; traceId: string | null }>({
+  message: '',
+  traceId: null,
+})
 
 const runsQuery = useQuery({
   queryKey: computed(() => [
@@ -111,9 +138,34 @@ const listError = computed(() => {
   return getApiErrorDisplay(runsQuery.error.value, '工作流运行列表加载失败')
 })
 
+const createRunMutation = useMutation({
+  mutationFn: (payload: CreateWorkflowRunPayload) => workflowsApi.createWorkflowRun(payload),
+  async onSuccess(run) {
+    ElMessage.success('工作流已启动')
+    createDialogVisible.value = false
+    createError.value = { message: '', traceId: null }
+    await queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
+    await router.push({ name: 'WorkflowRunDetail', params: { runId: run.runId } })
+  },
+  onError(error) {
+    createError.value = getApiErrorDisplay(error, '工作流启动失败')
+    ElMessage.error(createError.value.message)
+    void queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
+  },
+})
+
 watch(size, () => {
   page.value = 1
 })
+
+function openCreateDialog(): void {
+  createError.value = { message: '', traceId: null }
+  createDialogVisible.value = true
+}
+
+function createRun(payload: CreateWorkflowRunPayload): void {
+  createRunMutation.mutate(payload)
+}
 
 function searchRuns(): void {
   appliedStatus.value = statusInput.value

@@ -1,6 +1,7 @@
 import { httpClient } from '@/shared/api/httpClient'
 import type {
   ApprovalDecisionPayload,
+  CreateWorkflowRunPayload,
   WorkflowApproval,
   WorkflowApprovalQuery,
   WorkflowCheckpoint,
@@ -13,6 +14,11 @@ import type {
 export const workflowsApi = {
   async listWorkflowRuns(params: WorkflowRunQuery): Promise<WorkflowRunPage> {
     const { data } = await httpClient.get<WorkflowRunPage>('/workflows/runs', { params })
+    return data
+  },
+
+  async createWorkflowRun(payload: CreateWorkflowRunPayload): Promise<WorkflowRun> {
+    const { data } = await httpClient.post<WorkflowRun>('/workflows/runs', payload)
     return data
   },
 
