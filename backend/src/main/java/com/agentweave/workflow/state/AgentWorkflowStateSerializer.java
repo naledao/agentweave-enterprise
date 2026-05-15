@@ -15,7 +15,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.bsc.langgraph4j.serializer.StateSerializer;
+import org.springframework.stereotype.Component;
 
+@Component
 public class AgentWorkflowStateSerializer extends StateSerializer<AgentWorkflowState> {
 
     private final ObjectMapper objectMapper;
