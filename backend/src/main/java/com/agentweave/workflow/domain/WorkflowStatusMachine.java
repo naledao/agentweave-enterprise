@@ -20,6 +20,13 @@ public final class WorkflowStatusMachine {
                 WorkflowRunStatus.CANCELLED));
 
         TRANSITIONS.put(WorkflowRunStatus.EXECUTING, Set.of(
+                WorkflowRunStatus.WAITING_APPROVAL,
+                WorkflowRunStatus.REVIEWING,
+                WorkflowRunStatus.FAILED,
+                WorkflowRunStatus.CANCELLED));
+
+        TRANSITIONS.put(WorkflowRunStatus.WAITING_APPROVAL, Set.of(
+                WorkflowRunStatus.EXECUTING,
                 WorkflowRunStatus.REVIEWING,
                 WorkflowRunStatus.FAILED,
                 WorkflowRunStatus.CANCELLED));

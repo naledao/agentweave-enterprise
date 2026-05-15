@@ -9,10 +9,15 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import com.agentweave.workflow.dto.WorkflowReviewResult;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.UUID;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
+import java.util.List;
 
 @Entity
 @Table(name = "agent_steps")
@@ -45,6 +50,18 @@ public class AgentStepEntity {
     @Column(name = "output_summary", columnDefinition = "TEXT")
     private String outputSummary;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(nullable = false, columnDefinition = "jsonb")
+    private List<WorkflowReviewResult.Citation> citations = new ArrayList<>();
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "graph_paths", nullable = false, columnDefinition = "jsonb")
+    private List<WorkflowReviewResult.GraphPath> graphPaths = new ArrayList<>();
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "tool_calls", nullable = false, columnDefinition = "jsonb")
+    private List<WorkflowReviewResult.ToolCallResult> toolCalls = new ArrayList<>();
+
     @Column(name = "started_at")
     private Instant startedAt;
 
@@ -53,6 +70,15 @@ public class AgentStepEntity {
 
     @Column(name = "duration_ms")
     private Long durationMs;
+
+    @Column(name = "retry_count", nullable = false)
+    private int retryCount = 0;
+
+    @Column(name = "retry_reason", length = 500)
+    private String retryReason;
+
+    @Column(name = "last_retried_at")
+    private Instant lastRetriedAt;
 
     @Column(name = "error_code", length = 80)
     private String errorCode;
@@ -92,6 +118,15 @@ public class AgentStepEntity {
         calculateDuration();
     }
 
+    public void recordArtifacts(
+            List<WorkflowReviewResult.Citation> citations,
+            List<WorkflowReviewResult.GraphPath> graphPaths,
+            List<WorkflowReviewResult.ToolCallResult> toolCalls) {
+        this.citations = citations == null ? new ArrayList<>() : new ArrayList<>(citations);
+        this.graphPaths = graphPaths == null ? new ArrayList<>() : new ArrayList<>(graphPaths);
+        this.toolCalls = toolCalls == null ? new ArrayList<>() : new ArrayList<>(toolCalls);
+    }
+
     public void fail(String errorCode, String errorMessage, Instant now) {
         this.status = AgentStepStatus.FAILED;
         this.errorCode = errorCode;
@@ -104,6 +139,12 @@ public class AgentStepEntity {
         this.status = AgentStepStatus.SKIPPED;
         this.finishedAt = now;
         calculateDuration();
+    }
+
+    public void recordRetry(String reason, Instant now) {
+        this.retryCount++;
+        this.retryReason = reason;
+        this.lastRetriedAt = now;
     }
 
     private void calculateDuration() {
@@ -148,6 +189,18 @@ public class AgentStepEntity {
         return outputSummary;
     }
 
+    public List<WorkflowReviewResult.Citation> getCitations() {
+        return citations;
+    }
+
+    public List<WorkflowReviewResult.GraphPath> getGraphPaths() {
+        return graphPaths;
+    }
+
+    public List<WorkflowReviewResult.ToolCallResult> getToolCalls() {
+        return toolCalls;
+    }
+
     public Instant getStartedAt() {
         return startedAt;
     }
@@ -158,6 +211,18 @@ public class AgentStepEntity {
 
     public Long getDurationMs() {
         return durationMs;
+    }
+
+    public int getRetryCount() {
+        return retryCount;
+    }
+
+    public String getRetryReason() {
+        return retryReason;
+    }
+
+    public Instant getLastRetriedAt() {
+        return lastRetriedAt;
     }
 
     public String getErrorCode() {

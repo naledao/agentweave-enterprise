@@ -85,4 +85,38 @@ public class ModelCallLogService {
         }
         return sanitized.substring(0, ERROR_MESSAGE_MAX_LENGTH);
     }
+
+    @Transactional
+    public void recordAgentCall(
+            UUID conversationId,
+            UUID messageId,
+            String provider,
+            String model,
+            Integer promptTokens,
+            Integer completionTokens,
+            long latencyMs,
+            ModelCallStatus status,
+            String errorCode,
+            String errorMessage,
+            String traceId,
+            String agentStage,
+            UUID agentRunId,
+            UUID agentStepId) {
+        modelCallLogRepository.save(new ModelCallLogEntity(
+                UUID.randomUUID(),
+                conversationId,
+                messageId,
+                normalize(provider, DEFAULT_PROVIDER),
+                normalize(model, DEFAULT_MODEL),
+                promptTokens,
+                completionTokens,
+                latencyMs,
+                status,
+                errorCode,
+                errorMessage,
+                traceId,
+                agentStage,
+                agentRunId,
+                agentStepId));
+    }
 }

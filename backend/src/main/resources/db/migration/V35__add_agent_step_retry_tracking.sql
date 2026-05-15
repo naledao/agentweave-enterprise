@@ -1,0 +1,4 @@
+ALTER TABLE agent_steps
+    ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN retry_reason VARCHAR(500),
+    ADD COLUMN last_retried_at TIMESTAMP WITH TIME ZONE;

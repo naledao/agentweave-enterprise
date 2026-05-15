@@ -149,3 +149,10 @@ agentweave:
       database: ${AGENTWEAVE_GRAPHRAG_NEO4J_DATABASE:neo4j}
       username: ${AGENTWEAVE_GRAPHRAG_NEO4J_USERNAME:neo4j}
       password: ${AGENTWEAVE_GRAPHRAG_NEO4J_PASSWORD}
+
+langchain4j:
+  open-ai:
+    chat-model:
+      api-key: ${LANGCHAIN4J_OPENAI_API_KEY:${AGENTWEAVE_OPENAI_API_KEY}}
+      model-name: ${LANGCHAIN4J_OPENAI_MODEL_NAME:${spring.ai.openai.chat.options.model}}
+      base-url: ${LANGCHAIN4J_OPENAI_BASE_URL:${spring.ai.openai.base-url}}

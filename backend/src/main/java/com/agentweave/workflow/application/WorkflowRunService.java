@@ -11,6 +11,9 @@ import com.agentweave.workflow.domain.AgentStepType;
 import com.agentweave.workflow.domain.WorkflowRunStatus;
 import com.agentweave.workflow.domain.WorkflowStatusMachine;
 import com.agentweave.workflow.dto.CreateWorkflowRunRequest;
+import com.agentweave.workflow.dto.WorkflowRunListItemResponse;
+import com.agentweave.workflow.dto.WorkflowRunListResponse;
+import com.agentweave.workflow.dto.WorkflowRunQueryRequest;
 import com.agentweave.workflow.dto.WorkflowRunResponse;
 import com.agentweave.workflow.dto.WorkflowStepResponse;
 import com.agentweave.workflow.repository.AgentStepRepository;
@@ -18,6 +21,11 @@ import com.agentweave.workflow.repository.WorkflowRunRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,6 +62,19 @@ public class WorkflowRunService {
 
         AgentRunEntity saved = workflowRunRepository.save(run);
         return WorkflowRunResponse.from(saved);
+    }
+
+    @Transactional(readOnly = true)
+    public WorkflowRunListResponse list(WorkflowRunQueryRequest request) {
+        CurrentUser user = currentUserService.requireCurrentUser();
+        Pageable pageable = PageRequest.of(
+                request.pageNumber(),
+                request.pageSize(),
+                Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<WorkflowRunListItemResponse> runs = workflowRunRepository
+                .findAll(querySpec(request, user), pageable)
+                .map(WorkflowRunListItemResponse::from);
+        return WorkflowRunListResponse.from(runs);
     }
 
     @Transactional(readOnly = true)
@@ -97,6 +118,7 @@ public class WorkflowRunService {
         switch (targetStatus) {
             case PLANNING -> run.startPlanning(Instant.now());
             case EXECUTING -> run.startExecuting(Instant.now());
+            case WAITING_APPROVAL -> run.waitForApproval();
             case REVIEWING -> run.startReviewing(Instant.now());
             default -> throw new IllegalStateException("Use dedicated methods for terminal states");
         }
@@ -115,7 +137,9 @@ public class WorkflowRunService {
     @Transactional
     public void markFailed(UUID runId, String errorCode, String errorMessage) {
         AgentRunEntity run = require(runId);
-        WorkflowStatusMachine.validateTransition(run.getStatus(), WorkflowRunStatus.FAILED);
+        if (run.getStatus() != WorkflowRunStatus.FAILED) {
+            WorkflowStatusMachine.validateTransition(run.getStatus(), WorkflowRunStatus.FAILED);
+        }
         run.fail(errorCode, errorMessage, Instant.now());
         workflowRunRepository.save(run);
     }
@@ -160,9 +184,61 @@ public class WorkflowRunService {
         agentStepRepository.save(step);
     }
 
+    @Transactional
+    public void updateCurrentStepIndex(UUID runId, int currentStepIndex) {
+        AgentRunEntity run = require(runId);
+        run.setCurrentStepIndex(currentStepIndex);
+        workflowRunRepository.save(run);
+    }
+
     private AgentRunEntity require(UUID runId) {
         return workflowRunRepository.findById(runId)
                 .orElseThrow(() -> new ResourceNotFoundException("Workflow run not found: " + runId));
+    }
+
+    @Transactional(readOnly = true)
+    public AgentRunEntity getEntityById(UUID runId) {
+        return require(runId);
+    }
+
+    @Transactional(readOnly = true)
+    public AgentRunEntity getAccessibleEntityById(UUID runId) {
+        CurrentUser user = currentUserService.requireCurrentUser();
+        AgentRunEntity run = require(runId);
+        validateAccess(user, run);
+        return run;
+    }
+
+    @Transactional
+    public void prepareForRecovery(
+            UUID runId,
+            WorkflowRunStatus status,
+            int currentStepIndex,
+            boolean clearFinalAnswer) {
+        AgentRunEntity run = require(runId);
+        run.prepareRecovery(status, currentStepIndex, clearFinalAnswer, Instant.now());
+        workflowRunRepository.save(run);
+    }
+
+    @Transactional(readOnly = true)
+    public WorkflowRunResponse getInternal(UUID runId) {
+        return WorkflowRunResponse.from(require(runId));
+    }
+
+    private Specification<AgentRunEntity> querySpec(WorkflowRunQueryRequest request, CurrentUser user) {
+        Specification<AgentRunEntity> spec = readableBy(user);
+        WorkflowRunStatus status = request.normalizedStatus();
+        if (status == null) {
+            return spec;
+        }
+        return spec.and((root, query, builder) -> builder.equal(root.get("status"), status));
+    }
+
+    private Specification<AgentRunEntity> readableBy(CurrentUser user) {
+        if (user.hasRole("ADMIN")) {
+            return (root, query, builder) -> builder.conjunction();
+        }
+        return (root, query, builder) -> builder.equal(root.get("userId"), user.id());
     }
 
     private AgentStepEntity requireStep(UUID stepId) {

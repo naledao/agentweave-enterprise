@@ -10,6 +10,8 @@ public enum ErrorCode {
     VALIDATION_FAILED("COMMON_400", "Validation failed"),
     TOO_MANY_REQUESTS("COMMON_429", "Too many requests"),
     TOOL_TIMEOUT("TOOL_408", "Tool execution timeout"),
+    WORKFLOW_CHECKPOINT_INVALID("WORKFLOW_400", "Workflow checkpoint is invalid"),
+    WORKFLOW_RECOVERY_NOT_ALLOWED("WORKFLOW_409", "Workflow recovery is not allowed"),
     BUSINESS_ERROR("COMMON_001", "Business error");
 
     private final String code;

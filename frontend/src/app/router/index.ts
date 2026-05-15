@@ -70,6 +70,18 @@ export const router = createRouter({
           meta: { requiresAuth: true, title: '工具调用记录' },
         },
         {
+          path: 'workflows/runs',
+          name: 'WorkflowRuns',
+          component: () => import('@/features/workflows/views/WorkflowRunListView.vue'),
+          meta: { requiresAuth: true, title: '工作流运行' },
+        },
+        {
+          path: 'workflows/runs/:runId',
+          name: 'WorkflowRunDetail',
+          component: () => import('@/features/workflows/views/WorkflowRunDetailView.vue'),
+          meta: { requiresAuth: true, title: '工作流详情' },
+        },
+        {
           path: 'settings/users',
           name: 'Users',
           component: () => import('@/features/settings/views/UserManagementView.vue'),

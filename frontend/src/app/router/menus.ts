@@ -46,6 +46,13 @@ export const appMenus: AppMenu[] = [
     icon: Operation,
   },
   {
+    key: 'workflow-runs',
+    path: '/app/workflows/runs',
+    title: '工作流运行',
+    permissions: [],
+    icon: Operation,
+  },
+  {
     key: 'users',
     path: '/app/settings/users',
     title: '用户管理',

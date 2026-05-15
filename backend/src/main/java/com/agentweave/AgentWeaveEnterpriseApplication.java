@@ -5,7 +5,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.data.web.config.EnableSpringDataWebSupport;
 
-@SpringBootApplication
+@SpringBootApplication(exclude = {
+		dev.langchain4j.openai.spring.AutoConfig.class
+})
 @ConfigurationPropertiesScan
 @EnableSpringDataWebSupport(pageSerializationMode = EnableSpringDataWebSupport.PageSerializationMode.VIA_DTO)
 public class AgentWeaveEnterpriseApplication {

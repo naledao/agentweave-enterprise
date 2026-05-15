@@ -17,6 +17,7 @@ import com.agentweave.workflow.dto.WorkflowRunResponse;
 import com.agentweave.workflow.repository.AgentStepRepository;
 import com.agentweave.workflow.repository.WorkflowRunRepository;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,7 +52,7 @@ class WorkflowRunServiceTest {
     @BeforeEach
     void setUp() {
         userId = UUID.randomUUID();
-        currentUser = new CurrentUser(userId, "testuser", "Test User", "USER");
+        currentUser = new CurrentUser(userId, "testuser", "Test User", Set.of("USER"), Set.of());
     }
 
     @Test

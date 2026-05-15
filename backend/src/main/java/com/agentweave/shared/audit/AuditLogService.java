@@ -187,6 +187,54 @@ public class AuditLogService {
                 "role=" + roleCode + ";status=" + previousStatus + "->" + nextStatus);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordWorkflowApprovalCreated(UUID approvalId, UUID runId, UUID requestedBy, String toolCode) {
+        save(AuditEventType.WORKFLOW_APPROVAL_CREATED,
+                requestedBy,
+                null,
+                "WORKFLOW_APPROVAL",
+                approvalId.toString(),
+                "CREATE_WORKFLOW_APPROVAL",
+                AuditResult.SUCCESS,
+                "runId=" + runId + ";tool=" + toolCode);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordWorkflowApprovalApproved(CurrentUser approver, UUID approvalId, String reason) {
+        save(AuditEventType.WORKFLOW_APPROVAL_APPROVED,
+                approver.id(),
+                approver.username(),
+                "WORKFLOW_APPROVAL",
+                approvalId.toString(),
+                "APPROVE_WORKFLOW_APPROVAL",
+                AuditResult.SUCCESS,
+                truncateReason(reason));
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordWorkflowApprovalRejected(CurrentUser approver, UUID approvalId, String reason) {
+        save(AuditEventType.WORKFLOW_APPROVAL_REJECTED,
+                approver.id(),
+                approver.username(),
+                "WORKFLOW_APPROVAL",
+                approvalId.toString(),
+                "REJECT_WORKFLOW_APPROVAL",
+                AuditResult.DENIED,
+                truncateReason(reason));
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordWorkflowApprovalDenied(CurrentUser actor, UUID approvalId, String reason) {
+        save(AuditEventType.WORKFLOW_APPROVAL_DENIED,
+                actor.id(),
+                actor.username(),
+                "WORKFLOW_APPROVAL",
+                approvalId.toString(),
+                "DECIDE_WORKFLOW_APPROVAL",
+                AuditResult.DENIED,
+                truncateReason(reason));
+    }
+
     private void save(
             AuditEventType eventType,
             UUID userId,

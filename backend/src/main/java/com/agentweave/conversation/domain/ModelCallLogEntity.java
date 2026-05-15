@@ -49,6 +49,15 @@ public class ModelCallLogEntity {
     @Column(nullable = false, length = 120)
     private String traceId;
 
+    @Column(length = 50)
+    private String agentStage;
+
+    @Column
+    private UUID agentRunId;
+
+    @Column
+    private UUID agentStepId;
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -69,6 +78,25 @@ public class ModelCallLogEntity {
             String errorCode,
             String errorMessage,
             String traceId) {
+        this(id, conversationId, messageId, provider, model, promptTokens, completionTokens, latencyMs, status, errorCode, errorMessage, traceId, null, null, null);
+    }
+
+    public ModelCallLogEntity(
+            UUID id,
+            UUID conversationId,
+            UUID messageId,
+            String provider,
+            String model,
+            Integer promptTokens,
+            Integer completionTokens,
+            long latencyMs,
+            ModelCallStatus status,
+            String errorCode,
+            String errorMessage,
+            String traceId,
+            String agentStage,
+            UUID agentRunId,
+            UUID agentStepId) {
         this.id = id;
         this.conversationId = conversationId;
         this.messageId = messageId;
@@ -81,6 +109,9 @@ public class ModelCallLogEntity {
         this.errorCode = errorCode;
         this.errorMessage = errorMessage;
         this.traceId = traceId;
+        this.agentStage = agentStage;
+        this.agentRunId = agentRunId;
+        this.agentStepId = agentStepId;
     }
 
     public UUID getId() {
@@ -133,5 +164,17 @@ public class ModelCallLogEntity {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getAgentStage() {
+        return agentStage;
+    }
+
+    public UUID getAgentRunId() {
+        return agentRunId;
+    }
+
+    public UUID getAgentStepId() {
+        return agentStepId;
     }
 }

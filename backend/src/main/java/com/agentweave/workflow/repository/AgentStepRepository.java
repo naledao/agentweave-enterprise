@@ -2,6 +2,7 @@ package com.agentweave.workflow.repository;
 
 import com.agentweave.workflow.domain.AgentStepEntity;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
@@ -10,4 +11,8 @@ import org.springframework.stereotype.Repository;
 public interface AgentStepRepository extends JpaRepository<AgentStepEntity, UUID> {
 
     List<AgentStepEntity> findByRunIdOrderByStepIndexAsc(UUID runId);
+
+    Optional<AgentStepEntity> findByRunIdAndStepIndex(UUID runId, int stepIndex);
+
+    Optional<AgentStepEntity> findFirstByRun_IdOrderByStepIndexDesc(UUID runId);
 }

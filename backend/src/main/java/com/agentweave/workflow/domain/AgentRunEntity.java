@@ -93,6 +93,10 @@ public class AgentRunEntity {
         this.status = WorkflowRunStatus.REVIEWING;
     }
 
+    public void waitForApproval() {
+        this.status = WorkflowRunStatus.WAITING_APPROVAL;
+    }
+
     public void succeed(String finalAnswer, Instant now) {
         this.status = WorkflowRunStatus.SUCCEEDED;
         this.finalAnswer = finalAnswer;
@@ -111,8 +115,26 @@ public class AgentRunEntity {
         this.finishedAt = now;
     }
 
+    public void prepareRecovery(WorkflowRunStatus status, int currentStepIndex, boolean clearFinalAnswer, Instant now) {
+        this.status = status;
+        this.currentStepIndex = currentStepIndex;
+        this.errorCode = null;
+        this.errorMessage = null;
+        this.finishedAt = null;
+        if (clearFinalAnswer) {
+            this.finalAnswer = null;
+        }
+        if (this.startedAt == null) {
+            this.startedAt = now;
+        }
+    }
+
     public void advanceStep() {
         this.currentStepIndex++;
+    }
+
+    public void setCurrentStepIndex(int currentStepIndex) {
+        this.currentStepIndex = currentStepIndex;
     }
 
     public UUID getId() {
