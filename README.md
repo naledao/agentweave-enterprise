@@ -1,52 +1,83 @@
 # AgentWeave Enterprise
 
-AgentWeave Enterprise is an enterprise AI agent orchestration platform built around Spring Boot and Vue. It connects conversational AI, knowledge retrieval, tool calling, task execution, permission control, and observability into a reusable internal operations console.
+AgentWeave Enterprise is an enterprise AI agent orchestration platform built with Spring Boot and Vue. It focuses on turning large-model capabilities into practical business workflows: knowledge retrieval, tool calling, task planning, permission control, execution tracing, and operations-grade observability.
 
-## Architecture
+## Live Demo
 
-- `backend/` - Spring Boot 3.x service with JWT authentication, REST APIs, SSE streaming chat, RAG document ingestion, GraphRAG indexing, audit logging, and observability hooks.
-- `frontend/` - Vue 3, TypeScript, Vite, Vue Router, Pinia, TanStack Query for Vue, Element Plus, SSE client handling, and test coverage.
+- URL: http://14.103.202.40
+- Account: `admin`
+- Password: `admin123`
 
-## Core Capabilities
+## What It Does
 
-- User login and JWT-based authorization.
-- Document upload, parsing, cleaning, chunking, vector indexing, and GraphRAG indexing.
-- Multi-turn knowledge-base chat with SSE streaming responses.
-- Citations, graph paths, tool call records, workflow steps, and trace IDs surfaced to the UI.
-- Role, permission, user, conversation, document, and settings management views.
-- Flyway-managed database migrations and focused backend/frontend tests.
+- Provides JWT-based login, role management, user management, and permission-controlled console routes.
+- Supports multi-turn AI conversations with SSE streaming, request tracing, persisted messages, and graceful cancellation/timeout handling.
+- Builds a knowledge base from uploaded documents through parsing, cleaning, chunking, metadata tagging, vector indexing, and GraphRAG indexing.
+- Combines Vector RAG and GraphRAG retrieval so answers can include citations, graph paths, and retrieval trace information.
+- Exposes tool calling for business operations such as ticket queries, log search, and endpoint status checks, with permission checks and invocation audit records.
+- Uses Planner, Executor, and Reviewer style agent roles for complex task decomposition and result review.
+- Orchestrates longer-running agent workflows with stateful steps, retries, checkpoints, approval records, and execution timelines.
+- Provides an operations console for chat, conversations, knowledge documents, tools, tool invocation records, workflows, users, and roles.
 
-## Backend
+## Tech Stack
+
+Backend:
+
+- Java 17
+- Spring Boot 3.5
+- Spring Security + JWT
+- Spring AI ChatClient
+- PostgreSQL + pgvector
+- RabbitMQ
+- MinIO
+- Neo4j GraphRAG integration
+- LangChain4j
+- LangGraph4j
+- Flyway
+- Actuator + Micrometer
+
+Frontend:
+
+- Vue 3
+- TypeScript
+- Vite
+- Vue Router
+- Pinia
+- TanStack Query for Vue
+- Element Plus
+- Axios
+- SSE client handling
+- Vitest
+- Playwright
+
+## Project Structure
+
+```text
+backend/   Spring Boot backend service
+frontend/  Vue operations console
+```
+
+## Getting Started
+
+### Backend
 
 Requirements:
 
 - Java 17+
-- Maven Wrapper from `backend/mvnw`
 - PostgreSQL with pgvector
 - RabbitMQ
 - MinIO
-- Neo4j, optional for GraphRAG
-- An OpenAI-compatible chat model endpoint
-- Ollama, optional for local embeddings
+- Neo4j
+- OpenAI-compatible chat model endpoint
+- Ollama-compatible embedding endpoint
 
-Create local environment variables from the sample file:
+Create a local environment file:
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-Set real values for secrets before running locally:
-
-- `AGENTWEAVE_OPENAI_API_KEY`
-- `AGENTWEAVE_DATASOURCE_PASSWORD`
-- `AGENTWEAVE_RABBITMQ_PASSWORD`
-- `AGENTWEAVE_JWT_SECRET`
-- `AGENTWEAVE_ADMIN_PASSWORD`
-- `AGENTWEAVE_MINIO_ACCESS_KEY`
-- `AGENTWEAVE_MINIO_SECRET_KEY`
-- `AGENTWEAVE_GRAPHRAG_NEO4J_PASSWORD`
-
-Run the backend:
+Update the values in `backend/.env`, then start the backend:
 
 ```bash
 cd backend
@@ -60,14 +91,14 @@ cd backend
 ./mvnw test
 ```
 
-## Frontend
+### Frontend
 
 Requirements:
 
 - Node.js 20+
 - npm
 
-Install and run:
+Install dependencies and start the dev server:
 
 ```bash
 cd frontend
@@ -75,14 +106,13 @@ npm install
 npm run dev
 ```
 
+The Vite dev server runs on `http://localhost:5173` and proxies `/api` to the backend.
+
 Useful checks:
 
 ```bash
 npm run typecheck
 npm run test:unit
+npm run test:e2e
 npm run build
 ```
-
-## Security Notes
-
-This repository intentionally keeps runtime secrets out of committed configuration. Use environment variables, a local `.env` file, or a secret manager for credentials and model provider keys.
