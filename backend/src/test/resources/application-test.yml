@@ -1,8 +1,8 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/agentweave_test
-    username: agentweave
-    password: test-postgres-password
+    url: ${AGENTWEAVE_DATASOURCE_URL:jdbc:postgresql://14.103.202.40:5432/agentweave}
+    username: ${AGENTWEAVE_DATASOURCE_USERNAME:agentweave}
+    password: ${AGENTWEAVE_DATASOURCE_PASSWORD}
   rabbitmq:
     listener:
       simple:
@@ -12,6 +12,14 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+  ai:
+    openai:
+      api-key: test-openai-api-key
+
+langchain4j:
+  open-ai:
+    chat-model:
+      api-key: test-openai-api-key
 
 agentweave:
   security:

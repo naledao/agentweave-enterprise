@@ -664,7 +664,7 @@ class ConversationControllerIntegrationTest {
                     return Flux.just("MiMo-V2.5 test answer.");
                 }));
         UUID conversationId = createConversation(userToken, "SSE session");
-        sendMessage(userToken, conversationId, "Analyze API timeout");
+        sendMessage(userToken, conversationId, "Analyze API timeout dependency path");
 
         MvcResult streamResult = mockMvc.perform(get("/api/v1/conversations/{conversationId}/stream", conversationId)
                         .header("Authorization", "Bearer " + userToken)

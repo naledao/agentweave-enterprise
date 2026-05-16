@@ -10,8 +10,8 @@ import org.springframework.stereotype.Component;
 public class TraceIdProvider {
 
     public static final String TRACE_ID_KEY = "traceId";
-    private static final String REQUEST_ID_HEADER = "X-Request-Id";
-    private static final String TRACE_ID_HEADER = "X-Trace-Id";
+    public static final String REQUEST_ID_HEADER = "X-Request-Id";
+    public static final String TRACE_ID_HEADER = "X-Trace-Id";
 
     public String currentTraceId() {
         String existing = MDC.get(TRACE_ID_KEY);

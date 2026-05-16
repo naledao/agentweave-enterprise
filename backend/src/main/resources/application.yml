@@ -66,6 +66,10 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+logging:
+  pattern:
+    level: "%5p traceId=%X{traceId:-} userId=%X{userId:-} conversationId=%X{conversationId:-} messageId=%X{messageId:-} toolCallId=%X{toolCallId:-} workflowRunId=%X{workflowRunId:-} workflowStepId=%X{workflowStepId:-}"
+
 management:
   endpoints:
     web:

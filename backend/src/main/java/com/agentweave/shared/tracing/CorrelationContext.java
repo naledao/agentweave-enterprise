@@ -1,5 +1,6 @@
 package com.agentweave.shared.tracing;
 
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
@@ -12,6 +13,14 @@ public class CorrelationContext {
 
     public Scope open(String traceId, UUID conversationId, UUID messageId) {
         return new Scope(traceId, conversationId, messageId);
+    }
+
+    public Scope open(TraceContext traceContext) {
+        return open(traceContext.traceId(), traceContext.conversationId(), traceContext.messageId());
+    }
+
+    public Optional<TraceContext> current() {
+        return TraceContext.fromMdc();
     }
 
     public static final class Scope implements AutoCloseable {
