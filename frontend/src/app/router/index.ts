@@ -2,6 +2,7 @@ import type { RouteLocationNormalized } from 'vue-router'
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { useAuthStore } from '@/features/auth/store/useAuthStore'
+import { resolveAuthRedirect } from '@/features/auth/utils/safeRedirect'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -181,6 +182,5 @@ async function tryRestoreSession(authStore: ReturnType<typeof useAuthStore>): Pr
 }
 
 function redirectAfterLogin(to: RouteLocationNormalized) {
-  const redirect = typeof to.query.redirect === 'string' ? to.query.redirect : '/app/chat'
-  return redirect
+  return resolveAuthRedirect(to.query.redirect)
 }

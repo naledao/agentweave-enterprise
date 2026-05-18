@@ -78,6 +78,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/features/auth/store/useAuthStore'
 import type { LoginRequest } from '@/features/auth/types'
+import { resolveAuthRedirect } from '@/features/auth/utils/safeRedirect'
 import { formatApiError } from '@/shared/utils/apiError'
 
 const route = useRoute()
@@ -125,8 +126,7 @@ async function submit(): Promise<void> {
 
   try {
     await authStore.login(form)
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/app/chat'
-    await router.replace(redirect)
+    await router.replace(resolveAuthRedirect(route.query.redirect))
   } catch (error) {
     errorMessage.value = formatApiError(error, '登录失败，请检查用户名或密码')
   }

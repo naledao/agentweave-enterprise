@@ -47,9 +47,15 @@
         </el-dropdown>
       </el-header>
 
-      <el-main class="app-main" :class="{ 'app-main--fixed': fixedMainRoutes.includes(String(route.name)) }">
-        <RouterView />
-      </el-main>
+      <el-container class="app-content-shell">
+        <el-main class="app-main" :class="{ 'app-main--fixed': fixedMainRoutes.includes(String(route.name)) }">
+          <RouterView />
+        </el-main>
+
+        <el-aside v-if="$slots.context" class="app-context-panel" width="320px">
+          <slot name="context" />
+        </el-aside>
+      </el-container>
     </el-container>
   </el-container>
 </template>
@@ -226,6 +232,18 @@ h1 {
   overflow: hidden;
 }
 
+.app-content-shell {
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-context-panel {
+  border-left: 1px solid #dce3ed;
+  background: #f8fafc;
+  overflow-y: auto;
+  padding: 16px;
+}
+
 @media (max-width: 820px) {
   .app-shell {
     display: flex;
@@ -246,6 +264,16 @@ h1 {
 
   .app-header {
     gap: 12px;
+  }
+
+  .app-content-shell {
+    display: block;
+  }
+
+  .app-context-panel {
+    width: 100% !important;
+    border-left: 0;
+    border-top: 1px solid #dce3ed;
   }
 }
 </style>
