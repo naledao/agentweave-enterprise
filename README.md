@@ -190,9 +190,3 @@ npm run test:unit
 npm run test:e2e
 npm run build
 ```
-
-## Deployment
-
-The public source repository is `naledao/agentweave-enterprise`. Deployment is handled by the private `naledao/agentweave-enterprise-deploy` repository and its GitHub Actions workflow, which triggers the `14.103.202.40` server to pull, build, and restart the application.
-
-The current live deployment serves the Vue frontend through HTTP on port `80` and the backend on port `8080`.
