@@ -132,8 +132,6 @@ AGENTWEAVE_ADMIN_PASSWORD
 
 The default chat model is configured as `mimo-v2.5` through the OpenAI-compatible Spring AI configuration. The default embedding provider is Ollama-compatible and uses `qwen3-embedding:0.6b`.
 
-Do not commit real runtime secrets. Use environment variables, a local `.env` file, server-side secrets, or a secret manager.
-
 ## Getting Started
 
 ### Backend
