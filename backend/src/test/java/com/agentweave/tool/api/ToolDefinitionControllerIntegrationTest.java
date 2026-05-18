@@ -16,6 +16,7 @@ import com.agentweave.auth.repository.PermissionRepository;
 import com.agentweave.auth.repository.RoleRepository;
 import com.agentweave.auth.repository.UserRepository;
 import com.agentweave.shared.audit.AuditEventType;
+import com.agentweave.shared.audit.AuditResult;
 import com.agentweave.shared.audit.AuditLogRepository;
 import com.agentweave.tool.domain.ToolDefinitionEntity;
 import com.agentweave.tool.domain.ToolInvocationEntity;
@@ -24,6 +25,7 @@ import com.agentweave.tool.domain.ToolRiskLevel;
 import com.agentweave.tool.repository.ToolDefinitionRepository;
 import com.agentweave.tool.repository.ToolInvocationRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -75,6 +77,9 @@ class ToolDefinitionControllerIntegrationTest {
 
     @Autowired
     private AuditLogRepository auditLogRepository;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     private String adminToken;
     private String userToken;
@@ -234,11 +239,29 @@ class ToolDefinitionControllerIntegrationTest {
 
         ToolInvocationEntity invocation = latestInvocation("trace-tool-allowed");
         assertThat(invocation.getToolCode()).isEqualTo("ticket.query");
+        assertThat(invocation.getToolName()).isEqualTo("工单查询");
+        assertThat(invocation.getRiskLevel()).isEqualTo(ToolRiskLevel.LOW);
         assertThat(invocation.getUsername()).isEqualTo(userUsername);
         assertThat(invocation.getStatus()).isEqualTo(ToolInvocationStatus.SUCCESS);
         assertThat(invocation.getDurationMs()).isNotNull();
         assertThat(invocation.getResultSummary()).contains("ticket-query");
         assertThat(invocation.getErrorMessage()).isNull();
+        assertThat(auditLogRepository.findByEventTypeAndUsernameOrderByCreatedAtDesc(
+                        AuditEventType.TOOL_INVOKE,
+                        userUsername))
+                .anySatisfy(log -> {
+                    assertThat(log.getResourceType()).isEqualTo("tool");
+                    assertThat(log.getResourceId()).isEqualTo("ticket.query");
+                    assertThat(log.getResult()).isEqualTo(AuditResult.SUCCESS);
+                    assertThat(log.getRequestSummary()).contains("queryTicket");
+                    assertThat(log.getResponseSummary()).contains("ticket-query");
+                });
+        assertThat(meterRegistry.find("agentweave.tool.call.duration")
+                        .tag("toolCode", "ticket.query")
+                        .tag("riskLevel", "LOW")
+                        .tag("status", "SUCCESS")
+                        .timer())
+                .isNotNull();
     }
 
     @Test
@@ -256,9 +279,24 @@ class ToolDefinitionControllerIntegrationTest {
 
         ToolInvocationEntity invocation = latestInvocation("trace-tool-denied");
         assertThat(invocation.getToolCode()).isEqualTo("endpoint.status");
+        assertThat(invocation.getToolName()).isEqualTo("接口状态查询");
         assertThat(invocation.getUsername()).isEqualTo(userUsername);
         assertThat(invocation.getStatus()).isEqualTo(ToolInvocationStatus.DENIED);
         assertThat(invocation.getErrorMessage()).isEqualTo("Missing tool permission");
+        assertThat(auditLogRepository.findByEventTypeAndUsernameOrderByCreatedAtDesc(
+                        AuditEventType.TOOL_DENIED,
+                        userUsername))
+                .anySatisfy(log -> {
+                    assertThat(log.getResourceType()).isEqualTo("tool");
+                    assertThat(log.getResourceId()).isEqualTo("endpoint.status");
+                    assertThat(log.getResult()).isEqualTo(AuditResult.DENIED);
+                    assertThat(log.getErrorMessage()).isEqualTo("Missing tool permission");
+                });
+        assertThat(meterRegistry.find("agentweave.tool.call.denied")
+                        .tag("toolCode", "endpoint.status")
+                        .tag("status", "DENIED")
+                        .counter())
+                .isNotNull();
     }
 
     @Test
@@ -344,6 +382,11 @@ class ToolDefinitionControllerIntegrationTest {
         assertThat(invocation.getStatus()).isEqualTo(ToolInvocationStatus.TIMEOUT);
         assertThat(invocation.getErrorMessage()).contains("tool execution timeout");
         assertThat(invocation.getFinishedAt()).isNotNull();
+        assertThat(meterRegistry.find("agentweave.tool.call.timeout")
+                        .tag("toolCode", "ticket.query")
+                        .tag("status", "TIMEOUT")
+                        .counter())
+                .isNotNull();
     }
 
     @Test
@@ -370,6 +413,11 @@ class ToolDefinitionControllerIntegrationTest {
         assertThat(invocation.getStatus()).isEqualTo(ToolInvocationStatus.FAILED);
         assertThat(invocation.getErrorMessage()).contains("demo ticket tool failure");
         assertThat(invocation.getFinishedAt()).isNotNull();
+        assertThat(meterRegistry.find("agentweave.tool.call.failures")
+                        .tag("toolCode", "ticket.query")
+                        .tag("status", "FAILED")
+                        .counter())
+                .isNotNull();
     }
 
     @Test
@@ -441,6 +489,8 @@ class ToolDefinitionControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(invocationId.toString()))
                 .andExpect(jsonPath("$.toolCode").value("ticket.query"))
+                .andExpect(jsonPath("$.toolName").value("工单查询"))
+                .andExpect(jsonPath("$.riskLevel").value("LOW"))
                 .andExpect(jsonPath("$.username").value(ownerUsername))
                 .andExpect(jsonPath("$.status").value("success"))
                 .andExpect(jsonPath("$.traceId").value("trace-tool-detail-owner"));

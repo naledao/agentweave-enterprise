@@ -21,6 +21,17 @@ public class ToolInvocationEntity {
     @Column(nullable = false, length = 120)
     private String toolCode;
 
+    @Column(nullable = false, length = 160)
+    private String toolName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 40)
+    private ToolType toolType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 40)
+    private ToolRiskLevel riskLevel;
+
     private UUID userId;
 
     @Column(length = 80)
@@ -29,6 +40,10 @@ public class ToolInvocationEntity {
     private UUID conversationId;
 
     private UUID messageId;
+
+    private UUID workflowRunId;
+
+    private UUID workflowStepId;
 
     @Column(columnDefinition = "TEXT")
     private String inputSummary;
@@ -60,19 +75,60 @@ public class ToolInvocationEntity {
     public ToolInvocationEntity(
             UUID id,
             String toolCode,
+            String toolName,
+            ToolRiskLevel riskLevel,
             UUID userId,
             String username,
             UUID conversationId,
             UUID messageId,
+            UUID workflowRunId,
+            UUID workflowStepId,
+            String inputSummary,
+            ToolInvocationStatus status,
+            String traceId) {
+        this(
+                id,
+                toolCode,
+                toolName,
+                ToolType.UNKNOWN,
+                riskLevel,
+                userId,
+                username,
+                conversationId,
+                messageId,
+                workflowRunId,
+                workflowStepId,
+                inputSummary,
+                status,
+                traceId);
+    }
+
+    public ToolInvocationEntity(
+            UUID id,
+            String toolCode,
+            String toolName,
+            ToolType toolType,
+            ToolRiskLevel riskLevel,
+            UUID userId,
+            String username,
+            UUID conversationId,
+            UUID messageId,
+            UUID workflowRunId,
+            UUID workflowStepId,
             String inputSummary,
             ToolInvocationStatus status,
             String traceId) {
         this.id = id;
         this.toolCode = toolCode;
+        this.toolName = toolName;
+        this.toolType = toolType == null ? ToolType.UNKNOWN : toolType;
+        this.riskLevel = riskLevel;
         this.userId = userId;
         this.username = username;
         this.conversationId = conversationId;
         this.messageId = messageId;
+        this.workflowRunId = workflowRunId;
+        this.workflowStepId = workflowStepId;
         this.inputSummary = inputSummary;
         this.status = status;
         this.traceId = traceId;
@@ -118,6 +174,18 @@ public class ToolInvocationEntity {
         return toolCode;
     }
 
+    public String getToolName() {
+        return toolName;
+    }
+
+    public ToolType getToolType() {
+        return toolType;
+    }
+
+    public ToolRiskLevel getRiskLevel() {
+        return riskLevel;
+    }
+
     public UUID getUserId() {
         return userId;
     }
@@ -132,6 +200,14 @@ public class ToolInvocationEntity {
 
     public UUID getMessageId() {
         return messageId;
+    }
+
+    public UUID getWorkflowRunId() {
+        return workflowRunId;
+    }
+
+    public UUID getWorkflowStepId() {
+        return workflowStepId;
     }
 
     public String getInputSummary() {

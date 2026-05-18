@@ -63,8 +63,11 @@ public class ConversationRagService {
                             null,
                             null,
                             null,
+                            null,
+                            null,
                             retrievalPlan.vectorTopK(),
-                            retrievalPlan.similarityThreshold()))
+                            retrievalPlan.similarityThreshold()),
+                            retrievalPlan.retrievalMode())
                     : null;
             GraphRagRetrievalResponse graphResponse = retrievalPlan.shouldSearchGraph()
                     ? graphRagRetrievalService.retrieve(prompt, vectorResponse)

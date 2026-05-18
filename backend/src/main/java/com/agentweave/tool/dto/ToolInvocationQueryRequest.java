@@ -1,6 +1,7 @@
 package com.agentweave.tool.dto;
 
 import com.agentweave.tool.domain.ToolInvocationStatus;
+import com.agentweave.tool.domain.ToolType;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
@@ -19,6 +20,9 @@ public record ToolInvocationQueryRequest(
         String toolCode,
 
         @Size(max = 40)
+        String toolType,
+
+        @Size(max = 40)
         String status,
 
         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
@@ -30,6 +34,16 @@ public record ToolInvocationQueryRequest(
     private static final int DEFAULT_PAGE = 0;
     private static final int DEFAULT_SIZE = 20;
     private static final int MAX_SIZE = 100;
+
+    public ToolInvocationQueryRequest(
+            Integer page,
+            Integer size,
+            String toolCode,
+            String status,
+            Instant createdFrom,
+            Instant createdTo) {
+        this(page, size, toolCode, null, status, createdFrom, createdTo);
+    }
 
     public int pageNumber() {
         return page == null ? DEFAULT_PAGE : page;
@@ -51,5 +65,9 @@ public record ToolInvocationQueryRequest(
 
     public ToolInvocationStatus normalizedStatus() {
         return ToolInvocationStatus.fromQuery(status);
+    }
+
+    public ToolType normalizedToolType() {
+        return ToolType.fromQuery(toolType);
     }
 }

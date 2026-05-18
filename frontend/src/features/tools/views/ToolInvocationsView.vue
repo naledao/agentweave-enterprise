@@ -33,6 +33,24 @@
         </el-input>
 
         <el-select
+          v-model="filterForm.toolType"
+          clearable
+          placeholder="工具类型"
+          style="width: 150px"
+          @change="searchInvocations"
+          @clear="searchInvocations"
+        >
+          <el-option label="业务查询" value="BUSINESS_QUERY" />
+          <el-option label="日志检索" value="LOG_SEARCH" />
+          <el-option label="数据库只读" value="DATABASE_READ" />
+          <el-option label="接口状态" value="ENDPOINT_STATUS" />
+          <el-option label="消息通知" value="NOTIFICATION" />
+          <el-option label="MCP 资源" value="MCP_RESOURCE" />
+          <el-option label="脚本" value="SCRIPT" />
+          <el-option label="未知" value="UNKNOWN" />
+        </el-select>
+
+        <el-select
           v-model="filterForm.status"
           clearable
           placeholder="状态"
@@ -65,11 +83,16 @@
       </div>
     </div>
 
+    <ToolInvocationSummaryPanel
+      :summary="invocationSummary"
+      :loading="summaryQuery.isFetching.value"
+    />
+
     <div class="page-surface invocation-table-surface">
       <ToolInvocationTable
         class="invocation-table"
         :invocations="invocations"
-        :loading="invocationsQuery.isFetching.value"
+        :loading="summaryQuery.isFetching.value"
         @open="openInvocation"
       />
 
@@ -100,8 +123,9 @@ import { computed, reactive, ref, watch } from 'vue'
 
 import { toolsApi } from '@/features/tools/api/toolsApi'
 import ToolInvocationDetailDrawer from '@/features/tools/components/ToolInvocationDetailDrawer.vue'
+import ToolInvocationSummaryPanel from '@/features/tools/components/ToolInvocationSummaryPanel.vue'
 import ToolInvocationTable from '@/features/tools/components/ToolInvocationTable.vue'
-import type { ToolInvocation, ToolInvocationStatus } from '@/features/tools/types'
+import type { ToolInvocation, ToolInvocationStatus, ToolType } from '@/features/tools/types'
 import PageHeader from '@/shared/components/PageHeader.vue'
 import TraceIdText from '@/shared/components/TraceIdText.vue'
 import { getApiErrorDisplay } from '@/shared/utils/apiError'
@@ -115,44 +139,41 @@ const detailDrawerVisible = ref(false)
 
 const filterForm = reactive<{
   toolCode: string
+  toolType: ToolType | ''
   status: ToolInvocationStatus | ''
   createdRange: DateRange
 }>({
   toolCode: '',
+  toolType: '',
   status: '',
   createdRange: null,
 })
 
 const appliedFilters = reactive<{
   toolCode: string
+  toolType: ToolType | ''
   status: ToolInvocationStatus | ''
   createdRange: DateRange
 }>({
   toolCode: '',
+  toolType: '',
   status: '',
   createdRange: null,
 })
 
-const invocationsQuery = useQuery({
-  queryKey: computed(() => [
-    'tool-invocations',
-    {
-      page: page.value - 1,
-      size: size.value,
-      toolCode: appliedFilters.toolCode || undefined,
-      status: appliedFilters.status || undefined,
-      createdFrom: toIso(appliedFilters.createdRange?.[0] ?? null),
-      createdTo: toIso(appliedFilters.createdRange?.[1] ?? null),
-    },
-  ]),
-  queryFn: () => toolsApi.listInvocations({
-    page: page.value - 1,
-    size: size.value,
-    toolCode: appliedFilters.toolCode || undefined,
-    status: appliedFilters.status || undefined,
-    createdFrom: toIso(appliedFilters.createdRange?.[0] ?? null),
-    createdTo: toIso(appliedFilters.createdRange?.[1] ?? null),
-  }),
+const queryParams = computed(() => ({
+  page: page.value - 1,
+  size: size.value,
+  toolCode: appliedFilters.toolCode || undefined,
+  toolType: appliedFilters.toolType || undefined,
+  status: appliedFilters.status || undefined,
+  createdFrom: toIso(appliedFilters.createdRange?.[0] ?? null),
+  createdTo: toIso(appliedFilters.createdRange?.[1] ?? null),
+}))
+
+const summaryQuery = useQuery({
+  queryKey: computed(() => ['tool-invocation-summary', queryParams.value]),
+  queryFn: () => toolsApi.getInvocationSummary(queryParams.value),
 })
 
 const invocationDetailQuery = useQuery({
@@ -161,15 +182,16 @@ const invocationDetailQuery = useQuery({
   enabled: computed(() => Boolean(selectedInvocationId.value) && detailDrawerVisible.value),
 })
 
-const invocations = computed(() => invocationsQuery.data.value?.items ?? [])
-const total = computed(() => invocationsQuery.data.value?.total ?? 0)
+const invocationSummary = computed(() => summaryQuery.data.value ?? null)
+const invocations = computed(() => invocationSummary.value?.invocations.items ?? [])
+const total = computed(() => invocationSummary.value?.invocations.total ?? 0)
 const invocationDetail = computed(() => invocationDetailQuery.data.value ?? null)
 const listError = computed(() => {
-  if (!invocationsQuery.isError.value) {
+  if (!summaryQuery.isError.value) {
     return { message: '', traceId: null }
   }
 
-  return getApiErrorDisplay(invocationsQuery.error.value, '工具调用记录加载失败')
+  return getApiErrorDisplay(summaryQuery.error.value, '工具调用记录加载失败')
 })
 const detailError = computed(() => {
   if (!invocationDetailQuery.isError.value) {
@@ -191,6 +213,7 @@ watch(detailDrawerVisible, (visible) => {
 
 function searchInvocations(): void {
   appliedFilters.toolCode = filterForm.toolCode.trim()
+  appliedFilters.toolType = filterForm.toolType
   appliedFilters.status = filterForm.status
   appliedFilters.createdRange = filterForm.createdRange
   page.value = 1
@@ -198,6 +221,7 @@ function searchInvocations(): void {
 
 function resetFilters(): void {
   filterForm.toolCode = ''
+  filterForm.toolType = ''
   filterForm.status = ''
   filterForm.createdRange = null
   searchInvocations()

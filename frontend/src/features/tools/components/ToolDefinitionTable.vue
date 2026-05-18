@@ -8,6 +8,11 @@
   >
     <el-table-column prop="name" label="名称" min-width="150" />
     <el-table-column prop="code" label="编码" min-width="170" />
+    <el-table-column label="类型" width="130">
+      <template #default="{ row }: { row: ToolDefinition }">
+        {{ formatToolType(row.toolType) }}
+      </template>
+    </el-table-column>
     <el-table-column label="风险等级" width="120">
       <template #default="{ row }: { row: ToolDefinition }">
         <ToolRiskTag :risk-level="row.riskLevel" />
@@ -45,6 +50,20 @@ defineProps<{
   loading?: boolean
   height?: string | number
 }>()
+
+function formatToolType(value: ToolDefinition['toolType']): string {
+  const map: Record<ToolDefinition['toolType'], string> = {
+    BUSINESS_QUERY: '业务查询',
+    LOG_SEARCH: '日志检索',
+    DATABASE_READ: '数据库只读',
+    ENDPOINT_STATUS: '接口状态',
+    NOTIFICATION: '消息通知',
+    MCP_RESOURCE: 'MCP 资源',
+    SCRIPT: '脚本',
+    UNKNOWN: '未知',
+  }
+  return map[value] ?? value
+}
 </script>
 
 <style scoped>

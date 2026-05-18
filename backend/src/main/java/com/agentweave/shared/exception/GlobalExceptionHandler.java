@@ -15,9 +15,13 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     private final TraceIdProvider traceIdProvider;
     private final AuditLogService auditLogService;
@@ -84,6 +88,11 @@ public class GlobalExceptionHandler {
         String message = ex.getBindingResult().getFieldErrors().stream()
                 .map(this::formatFieldError)
                 .collect(Collectors.joining("; "));
+        auditLogService.recordValidationFailed(
+                "HTTP",
+                request.getRequestURI(),
+                request.getMethod(),
+                message);
         return build(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_FAILED, message, request);
     }
 
@@ -94,11 +103,21 @@ public class GlobalExceptionHandler {
         String message = ex.getConstraintViolations().stream()
                 .map(this::formatConstraintViolation)
                 .collect(Collectors.joining("; "));
+        auditLogService.recordValidationFailed(
+                "HTTP",
+                request.getRequestURI(),
+                request.getMethod(),
+                message);
         return build(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_FAILED, message, request);
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(Exception ex, HttpServletRequest request) {
+        log.error("Unhandled request error: method={}, path={}, traceId={}",
+                request.getMethod(),
+                request.getRequestURI(),
+                traceIdProvider.currentTraceId(request),
+                ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCode.BUSINESS_ERROR, "Internal server error", request);
     }
 

@@ -95,6 +95,7 @@ class WorkflowApprovalServiceTest {
                 .contains("138****5678")
                 .doesNotContain("sk-demo")
                 .doesNotContain("13812345678");
+        verify(agentStepService).waitForApproval(step.getId());
         verify(workflowRunService).transitionTo(run.getId(), WorkflowRunStatus.WAITING_APPROVAL);
         verify(auditLogService).recordWorkflowApprovalCreated(approval.getId(), run.getId(), requesterId, "tool:log:search");
     }

@@ -30,6 +30,8 @@ function workflowStep(): WorkflowStep {
     stepIndex: 1,
     stepType: 'RAG_SEARCH',
     nodeName: 'rag_node',
+    agentRole: 'EXECUTOR',
+    traceId: 'trace-step-1',
     status: 'SUCCEEDED',
     inputSummary: 'instruction=search payment docs',
     outputSummary: 'found payment runbook',

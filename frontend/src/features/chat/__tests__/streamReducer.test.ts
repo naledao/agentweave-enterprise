@@ -179,4 +179,15 @@ describe('streamReducer', () => {
     expect(state.content).toBe('')
     expect(state.seenEventIds).toContain('evt-after-done')
   })
+
+  it('keeps cancelled streams from returning to streaming on late events', () => {
+    let state = createInitialStreamState()
+    state = { ...state, status: 'cancelled' }
+
+    state = reduceStreamEvent(state, { type: 'message_delta', eventId: 'evt-late-token', delta: 'late token' })
+
+    expect(state.status).toBe('cancelled')
+    expect(state.content).toBe('')
+    expect(state.seenEventIds).toContain('evt-late-token')
+  })
 })

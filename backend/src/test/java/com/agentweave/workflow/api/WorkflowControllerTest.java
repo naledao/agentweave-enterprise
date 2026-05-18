@@ -23,6 +23,7 @@ import com.agentweave.workflow.dto.WorkflowRunListResponse;
 import com.agentweave.workflow.dto.WorkflowRunQueryRequest;
 import com.agentweave.workflow.dto.WorkflowRunResponse;
 import com.agentweave.workflow.dto.WorkflowStepResponse;
+import com.agentweave.workflow.domain.AgentRole;
 import com.agentweave.workflow.domain.WorkflowRunStatus;
 import com.agentweave.workflow.domain.AgentStepStatus;
 import com.agentweave.workflow.domain.AgentStepType;
@@ -196,11 +197,13 @@ class WorkflowControllerTest {
         List<WorkflowStepResponse> steps = List.of(
                 new WorkflowStepResponse(
                         UUID.randomUUID(), 0, AgentStepType.PLANNING, "planner",
+                        AgentRole.PLANNER, "trace-step-1",
                         AgentStepStatus.SUCCEEDED, "input1", "output1",
                         now, now, 100L, 0, null, null, null, null,
                         List.of(), List.of(), List.of()),
                 new WorkflowStepResponse(
                         UUID.randomUUID(), 1, AgentStepType.RAG_SEARCH, "rag",
+                        AgentRole.EXECUTOR, "trace-step-2",
                         AgentStepStatus.RUNNING, "input2", null,
                         now, null, null, 0, null, null, null, null,
                         List.of(new WorkflowStepResponse.WorkflowCitation(
@@ -232,6 +235,8 @@ class WorkflowControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].stepIndex").value(0))
                 .andExpect(jsonPath("$[0].stepType").value("PLANNING"))
+                .andExpect(jsonPath("$[0].agentRole").value("PLANNER"))
+                .andExpect(jsonPath("$[0].traceId").value("trace-step-1"))
                 .andExpect(jsonPath("$[0].status").value("SUCCEEDED"))
                 .andExpect(jsonPath("$[1].stepIndex").value(1))
                 .andExpect(jsonPath("$[1].stepType").value("RAG_SEARCH"))

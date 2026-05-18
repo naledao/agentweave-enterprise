@@ -52,6 +52,8 @@ function timelineType(status: WorkflowStepStatus): 'primary' | 'success' | 'warn
   const map: Record<WorkflowStepStatus, 'primary' | 'success' | 'warning' | 'danger' | 'info'> = {
     PENDING: 'info',
     RUNNING: 'primary',
+    WAITING_APPROVAL: 'warning',
+    RETRYING: 'warning',
     SUCCEEDED: 'success',
     FAILED: 'danger',
     SKIPPED: 'warning',

@@ -20,6 +20,9 @@ import com.agentweave.auth.domain.UserEntity;
 import com.agentweave.auth.repository.PermissionRepository;
 import com.agentweave.auth.repository.RoleRepository;
 import com.agentweave.auth.repository.UserRepository;
+import com.agentweave.conversation.domain.ModelCallScenario;
+import com.agentweave.conversation.domain.ModelCallStatus;
+import com.agentweave.conversation.repository.ModelCallLogRepository;
 import com.agentweave.graphrag.application.KnowledgeGraphExtractionAgent;
 import com.agentweave.graphrag.domain.KnowledgeGraphChunkAssociation;
 import com.agentweave.graphrag.domain.KnowledgeGraphEntity;
@@ -95,6 +98,9 @@ class GraphRagIndexingIntegrationTest {
 
     @Autowired
     private GraphRagIndexLogRepository graphRagIndexLogRepository;
+
+    @Autowired
+    private ModelCallLogRepository modelCallLogRepository;
 
     @Autowired
     private KnowledgeGraphEntityRepository knowledgeGraphEntityRepository;
@@ -228,6 +234,15 @@ class GraphRagIndexingIntegrationTest {
         assertThat(document.getStatus().name()).isEqualTo("INDEXED");
         assertThat(graphRagIndexLogRepository.findFirstByDocumentIdOrderByCreatedAtDesc(documentId))
                 .isPresent();
+        assertThat(modelCallLogRepository.findFirstByTraceIdOrderByCreatedAtDesc(traceId))
+                .hasValueSatisfying(log -> {
+                    assertThat(log.getConversationId()).isNull();
+                    assertThat(log.getMessageId()).isNull();
+                    assertThat(log.getScenario()).isEqualTo(ModelCallScenario.GRAPHRAG_EXTRACTION);
+                    assertThat(log.getStatus()).isEqualTo(ModelCallStatus.SUCCESS);
+                    assertThat(log.getPromptSummary()).contains(documentId.toString());
+                    assertThat(log.getResponseSummary()).contains("entities=1").contains("relationships=1");
+                });
         assertThat(knowledgeGraphEntityRepository.findBySourceDocumentIdOrderByNormalizedNameAsc(documentId))
                 .hasSize(2);
         assertThat(knowledgeGraphEntityAliasRepository.findBySourceDocumentIdOrderByAliasAsc(documentId))
@@ -243,6 +258,56 @@ class GraphRagIndexingIntegrationTest {
                 any(),
                 any(),
                 any());
+    }
+
+    @Test
+    void indexingFailureRecordsGraphRagFailureLog() throws Exception {
+        String traceId = "trace-graphrag-index-failed-" + UUID.randomUUID();
+        MvcResult result = mockMvc.perform(multipart("/api/v1/documents")
+                        .file(textFile("graph-failed.txt", "order service calls payment api"))
+                        .param("source", "runbook")
+                        .param("businessDomain", "order")
+                        .param("documentType", "RUNBOOK")
+                        .param("permissionLevel", "INTERNAL")
+                        .header("Authorization", "Bearer " + uploadToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        UUID documentId = UUID.fromString(objectMapper
+                .readTree(result.getResponse().getContentAsString())
+                .get("documentId")
+                .asText());
+
+        when(documentStorageService.read(eq("agentweave-documents"), any()))
+                .thenReturn(stream("order service calls payment api"));
+        when(knowledgeGraphExtractionAgent.extract(any()))
+                .thenThrow(new IllegalStateException("Graph extraction provider timeout"));
+
+        mockMvc.perform(post("/api/v1/documents/{documentId}/parse", documentId)
+                        .header("Authorization", "Bearer " + uploadToken))
+                .andExpect(status().isOk());
+        documentApplicationService.chunkDocument(documentId, "order service calls payment api");
+
+        mockMvc.perform(post("/api/v1/documents/{documentId}/index", documentId)
+                        .header("Authorization", "Bearer " + uploadToken)
+                        .header("X-Trace-Id", traceId))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Trace-Id", traceId));
+
+        mockMvc.perform(get("/api/v1/documents/{documentId}", documentId)
+                        .header("Authorization", "Bearer " + uploadToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.graphRag.status").value("failed"))
+                .andExpect(jsonPath("$.graphRag.errorMessage").value("Graph extraction provider timeout"))
+                .andExpect(jsonPath("$.graphRag.traceId").value(traceId));
+
+        assertThat(graphRagIndexLogRepository.findFirstByDocumentIdOrderByCreatedAtDesc(documentId))
+                .hasValueSatisfying(log -> {
+                    assertThat(log.getStatus().name()).isEqualTo("FAILED");
+                    assertThat(log.getErrorMessage()).isEqualTo("Graph extraction provider timeout");
+                    assertThat(log.getDurationMs()).isGreaterThanOrEqualTo(0);
+                    assertThat(log.getChunkEntityCount()).isZero();
+                });
     }
 
     private PermissionEntity ensurePermission(String code, String name, PermissionType type) {

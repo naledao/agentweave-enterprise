@@ -21,8 +21,10 @@ import com.agentweave.auth.repository.PermissionRepository;
 import com.agentweave.auth.repository.RoleRepository;
 import com.agentweave.auth.repository.UserRepository;
 import com.agentweave.conversation.application.ConversationAiClient;
+import com.agentweave.conversation.application.ConversationAiChunk;
 import com.agentweave.conversation.application.ConversationAiResponse;
 import com.agentweave.conversation.application.ConversationPrompt;
+import com.agentweave.conversation.domain.ModelCallScenario;
 import com.agentweave.conversation.domain.ModelCallLogEntity;
 import com.agentweave.conversation.domain.ModelCallStatus;
 import com.agentweave.conversation.domain.ConversationMessageEntity;
@@ -120,7 +122,7 @@ class ConversationControllerIntegrationTest {
     @BeforeEach
     void setUp() throws Exception {
         when(conversationAiClient.streamAnswer(any()))
-                .thenReturn(Flux.just("MiMo-V2.5 test answer."));
+                .thenReturn(Flux.just(ConversationAiChunk.content("MiMo-V2.5 test answer.")));
         when(conversationAiClient.answer(any()))
                 .thenReturn(new ConversationAiResponse(
                         "MiMo-V2.5 sync answer.",
@@ -356,9 +358,13 @@ class ConversationControllerIntegrationTest {
         assertThat(log.getMessageId()).isEqualTo(assistantMessageId);
         assertThat(log.getProvider()).isEqualTo("openai");
         assertThat(log.getModel()).isEqualTo("mimo-v2.5");
+        assertThat(log.getScenario()).isEqualTo(ModelCallScenario.RAG_ANSWER);
+        assertThat(log.getPromptSummary()).contains("citations=1").contains("graphPaths=0");
+        assertThat(log.getResponseSummary()).isEqualTo("contentLength=22");
+        assertThat(log.getResponseSummary()).doesNotContain("MiMo-V2.5 sync answer.");
         assertThat(log.getPromptTokens()).isEqualTo(12);
         assertThat(log.getCompletionTokens()).isEqualTo(8);
-        assertThat(log.getStatus()).isEqualTo(ModelCallStatus.SUCCEEDED);
+        assertThat(log.getStatus()).isEqualTo(ModelCallStatus.SUCCESS);
         assertThat(log.getTraceId()).isEqualTo(traceId);
 
         ConversationMessageEntity assistantMessage = conversationMessageRepository
@@ -439,6 +445,7 @@ class ConversationControllerIntegrationTest {
                 .findFirstByConversationIdOrderByCreatedAtDesc(conversationId)
                 .orElseThrow();
         assertThat(log.getStatus()).isEqualTo(ModelCallStatus.FAILED);
+        assertThat(log.getScenario()).isEqualTo(ModelCallScenario.CHAT_SYNC);
         assertThat(log.getErrorCode()).isEqualTo("MODEL_CALL_FAILED");
         assertThat(log.getTraceId()).isEqualTo(traceId);
         assertThat(log.getErrorMessage()).contains("token=******");
@@ -661,7 +668,14 @@ class ConversationControllerIntegrationTest {
                     modelConversationId.set(MDC.get(CorrelationContext.CONVERSATION_ID_KEY));
                     modelMessageId.set(MDC.get(CorrelationContext.MESSAGE_ID_KEY));
                     modelPrompt.set(invocation.getArgument(0));
-                    return Flux.just("MiMo-V2.5 test answer.");
+                    return Flux.just(
+                            ConversationAiChunk.content("MiMo-V2.5 test answer."),
+                            ConversationAiChunk.metadata(new ConversationAiResponse(
+                                    "",
+                                    "openai",
+                                    "mimo-v2.5",
+                                    13,
+                                    9)));
                 }));
         UUID conversationId = createConversation(userToken, "SSE session");
         sendMessage(userToken, conversationId, "Analyze API timeout dependency path");
@@ -722,9 +736,15 @@ class ConversationControllerIntegrationTest {
                 .findFirstByConversationIdOrderByCreatedAtDesc(conversationId)
                 .orElseThrow();
         assertThat(log.getMessageId()).isNotNull();
-        assertThat(log.getStatus()).isEqualTo(ModelCallStatus.SUCCEEDED);
+        assertThat(log.getStatus()).isEqualTo(ModelCallStatus.SUCCESS);
         assertThat(log.getProvider()).isEqualTo("openai");
-        assertThat(log.getModel()).isEqualTo("unknown");
+        assertThat(log.getModel()).isEqualTo("mimo-v2.5");
+        assertThat(log.getScenario()).isEqualTo(ModelCallScenario.RAG_ANSWER);
+        assertThat(log.getPromptSummary()).contains("citations=1").contains("graphPaths=1");
+        assertThat(log.getResponseSummary()).isEqualTo("contentLength=22");
+        assertThat(log.getResponseSummary()).doesNotContain("MiMo-V2.5 test answer.");
+        assertThat(log.getPromptTokens()).isEqualTo(13);
+        assertThat(log.getCompletionTokens()).isEqualTo(9);
         assertThat(log.getTraceId()).isEqualTo(traceId);
         assertThat(modelTraceId.get()).isEqualTo(traceId);
         assertThat(modelConversationId.get()).isEqualTo(conversationId.toString());
@@ -738,7 +758,7 @@ class ConversationControllerIntegrationTest {
 
     @Test
     void cancellingStreamMarksAssistantMessageCancelled() throws Exception {
-        Sinks.Many<String> streamSink = Sinks.many().multicast().onBackpressureBuffer();
+        Sinks.Many<ConversationAiChunk> streamSink = Sinks.many().multicast().onBackpressureBuffer();
         when(conversationAiClient.streamAnswer(any()))
                 .thenReturn(streamSink.asFlux());
         UUID conversationId = createConversation(userToken, "SSE 取消会话");
@@ -756,11 +776,17 @@ class ConversationControllerIntegrationTest {
                 .andExpect(jsonPath("$.messages[1].role").value("ASSISTANT"))
                 .andExpect(jsonPath("$.messages[1].status").value("CANCELLED"))
                 .andExpect(jsonPath("$.messages[1].errorCode").value("CHAT_ASSISTANT_CANCELLED"));
+
+        ModelCallLogEntity log = modelCallLogRepository
+                .findFirstByConversationIdOrderByCreatedAtDesc(conversationId)
+                .orElseThrow();
+        assertThat(log.getStatus()).isEqualTo(ModelCallStatus.CANCELLED);
+        assertThat(log.getScenario()).isEqualTo(ModelCallScenario.CHAT_STREAM);
     }
 
     @Test
     void cancelEndpointCancelsActiveStreamAndReturnsMessageStatus() throws Exception {
-        Sinks.Many<String> streamSink = Sinks.many().multicast().onBackpressureBuffer();
+        Sinks.Many<ConversationAiChunk> streamSink = Sinks.many().multicast().onBackpressureBuffer();
         when(conversationAiClient.streamAnswer(any()))
                 .thenReturn(streamSink.asFlux());
         UUID conversationId = createConversation(userToken, "SSE ä¸»åŠ¨å–æ¶ˆä¼šè¯");
@@ -810,7 +836,7 @@ class ConversationControllerIntegrationTest {
         CountDownLatch subscribed = new CountDownLatch(1);
         CountDownLatch cancelled = new CountDownLatch(1);
         AtomicBoolean cancelledBeforeExtraToken = new AtomicBoolean(false);
-        Sinks.Many<String> modelStream = Sinks.many().multicast().onBackpressureBuffer();
+        Sinks.Many<ConversationAiChunk> modelStream = Sinks.many().multicast().onBackpressureBuffer();
         when(conversationAiClient.streamAnswer(any()))
                 .thenAnswer(invocation -> modelStream.asFlux()
                         .doOnSubscribe(ignored -> subscribed.countDown())
@@ -851,7 +877,7 @@ class ConversationControllerIntegrationTest {
         assertThat(cancelled.await(2, TimeUnit.SECONDS)).isTrue();
         assertThat(modelStream.currentSubscriberCount()).isZero();
         assertThat(cancelledBeforeExtraToken).isTrue();
-        modelStream.tryEmitNext("token emitted after cancellation");
+        modelStream.tryEmitNext(ConversationAiChunk.content("token emitted after cancellation"));
 
         mockMvc.perform(asyncDispatch(streamResult))
                 .andExpect(status().isOk())
@@ -870,7 +896,7 @@ class ConversationControllerIntegrationTest {
     @Test
     void streamRejectsWhenUserExceedsConcurrentLimit() throws Exception {
         assertThat(maxConcurrentStreamsPerUser).isEqualTo(1);
-        Sinks.Many<String> streamSink = Sinks.many().multicast().onBackpressureBuffer();
+        Sinks.Many<ConversationAiChunk> streamSink = Sinks.many().multicast().onBackpressureBuffer();
         when(conversationAiClient.streamAnswer(any()))
                 .thenReturn(streamSink.asFlux());
         UUID firstConversationId = createConversation(userToken, "SSE å¹¶å‘ä¸€");

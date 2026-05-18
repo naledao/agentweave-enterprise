@@ -14,11 +14,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
 @Component
 public class GraphPathSearchService {
 
+    private static final Logger log = LoggerFactory.getLogger(GraphPathSearchService.class);
     private static final int DEFAULT_MAX_PATH_COUNT = 5;
 
     private final GraphEntityResolver graphEntityResolver;
@@ -32,7 +36,16 @@ public class GraphPathSearchService {
             List<KnowledgeGraphEntity> entities,
             List<KnowledgeGraphEntityAlias> aliases,
             List<KnowledgeGraphRelationship> relationships) {
+        long started = System.nanoTime();
         List<KnowledgeGraphEntity> filteredEntities = filterEntities(request, entities);
+        log.info(
+                "GraphRAG path permission filter completed: traceId={}, entityCount={}, filteredEntityCount={}, businessDomain={}, permissionLevel={}, documentScoped={}",
+                traceId(),
+                entities.size(),
+                filteredEntities.size(),
+                valueOrUnknown(request.normalizedBusinessDomain()),
+                valueOrUnknown(request.normalizedPermissionLevel()),
+                request.documentId() != null);
         if (filteredEntities.isEmpty()) {
             return GraphRagRetrievalResponse.empty();
         }
@@ -45,6 +58,13 @@ public class GraphPathSearchService {
                 .filter(relationship -> entitiesById.containsKey(relationship.getSourceEntityId())
                         && entitiesById.containsKey(relationship.getTargetEntityId()))
                 .toList();
+        log.info(
+                "GraphRAG path relationship filter completed: traceId={}, aliasCount={}, filteredAliasCount={}, relationshipCount={}, filteredRelationshipCount={}",
+                traceId(),
+                aliases.size(),
+                filteredAliases.size(),
+                relationships.size(),
+                filteredRelationships.size());
 
         List<GraphEntityMatch> matches = graphEntityResolver.resolve(
                 request.normalizedQuery(),
@@ -54,6 +74,11 @@ public class GraphPathSearchService {
                 .map(match -> match.entity().getName())
                 .toList();
         if (!graphEntityResolver.shouldSearchGraph(request.normalizedQuery(), matches)) {
+            log.info(
+                    "GraphRAG path search skipped: traceId={}, resolvedEntityCount={}, matchedPathCount=0, filteredPathCount=0, durationMs={}",
+                    traceId(),
+                    resolvedEntities.size(),
+                    elapsedMillis(started));
             return new GraphRagRetrievalResponse(
                     List.of(),
                     resolvedEntities,
@@ -78,7 +103,8 @@ public class GraphPathSearchService {
         }
 
         int maxPathCount = request.maxPathCount() == null ? DEFAULT_MAX_PATH_COUNT : request.maxPathCount();
-        List<PathDraft> deduplicated = deduplicate(rawPaths).stream()
+        List<PathDraft> uniquePaths = deduplicate(rawPaths);
+        List<PathDraft> deduplicated = uniquePaths.stream()
                 .sorted(Comparator.comparing(PathDraft::confidence).reversed()
                         .thenComparing(PathDraft::depth)
                         .thenComparing(PathDraft::pathId))
@@ -88,6 +114,16 @@ public class GraphPathSearchService {
         List<GraphPathResponse> graphPaths = deduplicated.stream()
                 .map(PathDraft::toResponse)
                 .toList();
+        log.info(
+                "GraphRAG path search ranked: traceId={}, resolvedEntityCount={}, rawPathCount={}, deduplicatedPathCount={}, returnedPathCount={}, filteredPathCount={}, sourceChunkCount={}, durationMs={}",
+                traceId(),
+                resolvedEntities.size(),
+                rawPaths.size(),
+                uniquePaths.size(),
+                graphPaths.size(),
+                Math.max(0, rawPaths.size() - graphPaths.size()),
+                graphPaths.stream().flatMap(path -> path.sourceChunkIds().stream()).distinct().count(),
+                elapsedMillis(started));
         return new GraphRagRetrievalResponse(
                 graphPaths,
                 resolvedEntities,
@@ -272,6 +308,19 @@ public class GraphPathSearchService {
 
     private double clamp(double value) {
         return Math.max(0.0d, Math.min(1.0d, value));
+    }
+
+    private String traceId() {
+        String traceId = MDC.get(com.agentweave.shared.tracing.TraceIdProvider.TRACE_ID_KEY);
+        return traceId == null || traceId.isBlank() ? "unknown" : traceId;
+    }
+
+    private String valueOrUnknown(String value) {
+        return value == null || value.isBlank() ? "unknown" : value;
+    }
+
+    private long elapsedMillis(long startedNanos) {
+        return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
     }
 
     private record GraphEdge(

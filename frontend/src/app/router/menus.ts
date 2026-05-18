@@ -1,4 +1,13 @@
-import { ChatLineRound, Collection, Lock, MessageBox, Operation, Tools, User } from '@element-plus/icons-vue'
+import {
+  ChatLineRound,
+  Collection,
+  DataAnalysis,
+  Lock,
+  MessageBox,
+  Operation,
+  Tools,
+  User,
+} from '@element-plus/icons-vue'
 import type { Component } from 'vue'
 
 export interface AppMenu {
@@ -51,6 +60,13 @@ export const appMenus: AppMenu[] = [
     title: '工作流运行',
     permissions: [],
     icon: Operation,
+  },
+  {
+    key: 'observability',
+    path: '/app/observability',
+    title: '监控观测',
+    permissions: ['observability:read'],
+    icon: DataAnalysis,
   },
   {
     key: 'users',

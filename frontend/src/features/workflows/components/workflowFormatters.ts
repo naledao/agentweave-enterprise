@@ -63,6 +63,8 @@ export function stepStatusLabel(status: WorkflowStepStatus): string {
   const map: Record<WorkflowStepStatus, string> = {
     PENDING: '等待',
     RUNNING: '执行中',
+    WAITING_APPROVAL: '等待审批',
+    RETRYING: '重试中',
     SUCCEEDED: '成功',
     FAILED: '失败',
     SKIPPED: '跳过',

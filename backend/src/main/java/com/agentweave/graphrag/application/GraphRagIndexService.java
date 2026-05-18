@@ -18,9 +18,12 @@ import com.agentweave.knowledge.domain.DocumentEntity;
 import com.agentweave.knowledge.domain.DocumentStatus;
 import com.agentweave.knowledge.repository.DocumentChunkRepository;
 import com.agentweave.knowledge.repository.DocumentRepository;
+import com.agentweave.shared.audit.AuditEventType;
+import com.agentweave.shared.audit.AuditLog;
 import com.agentweave.shared.exception.BusinessException;
 import com.agentweave.shared.exception.ErrorCode;
 import com.agentweave.shared.exception.ResourceNotFoundException;
+import com.agentweave.shared.tracing.CorrelationContext;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -46,6 +49,7 @@ public class GraphRagIndexService {
     private final KnowledgeGraphRelationshipRepository knowledgeGraphRelationshipRepository;
     private final Neo4jGraphRepository neo4jGraphRepository;
     private final TransactionTemplate transactionTemplate;
+    private final CorrelationContext correlationContext;
 
     public GraphRagIndexService(
             DocumentRepository documentRepository,
@@ -60,7 +64,8 @@ public class GraphRagIndexService {
             KnowledgeGraphChunkAssociationRepository knowledgeGraphChunkAssociationRepository,
             KnowledgeGraphRelationshipRepository knowledgeGraphRelationshipRepository,
             Neo4jGraphRepository neo4jGraphRepository,
-            TransactionTemplate transactionTemplate) {
+            TransactionTemplate transactionTemplate,
+            CorrelationContext correlationContext) {
         this.documentRepository = documentRepository;
         this.documentChunkRepository = documentChunkRepository;
         this.graphRagExtractionService = graphRagExtractionService;
@@ -74,75 +79,142 @@ public class GraphRagIndexService {
         this.knowledgeGraphRelationshipRepository = knowledgeGraphRelationshipRepository;
         this.neo4jGraphRepository = neo4jGraphRepository;
         this.transactionTemplate = transactionTemplate;
+        this.correlationContext = correlationContext;
     }
 
+    @AuditLog(
+            eventType = AuditEventType.GRAPHRAG_INDEX,
+            resourceType = "document",
+            resourceId = "#documentId",
+            includeResponse = false)
     public GraphRagIndexSummaryResponse index(UUID documentId, String traceId) {
-        DocumentEntity document = findDocument(documentId);
-        validate(document);
-        List<DocumentChunkEntity> chunks = documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId);
-        if (chunks.isEmpty()) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "document has no indexed chunks to build graph");
-        }
+        try (CorrelationContext.Scope ignored = correlationContext.open(traceId, null, null)) {
+            DocumentEntity document = findDocument(documentId);
+            validate(document);
+            List<DocumentChunkEntity> chunks = documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId);
+            if (chunks.isEmpty()) {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "document has no indexed chunks to build graph");
+            }
 
-        GraphRagIndexLog logEntry = graphRagIndexLogService.start(documentId, traceId, chunks.size());
-        int entityCount = 0;
-        int relationshipCount = 0;
-        try {
-            List<GraphRagChunkExtraction> chunkExtractions = graphRagExtractionService.extract(document, chunks);
-            GraphRagEntityNormalizationResult entityResult = graphRagEntityNormalizer.normalize(document, chunkExtractions);
-            List<KnowledgeGraphRelationship> relationships = graphRagRelationshipNormalizer.normalize(
-                    documentId,
-                    chunkExtractions,
-                    entityResult.entityIdsByKey());
-
-            graphRagIndexCleanupService.deleteByDocumentId(documentId, chunkIds(chunks), traceId);
-
-            transactionTemplate.executeWithoutResult(status -> {
-                knowledgeGraphEntityRepository.saveAllAndFlush(entityResult.entities());
-                knowledgeGraphEntityAliasRepository.saveAllAndFlush(entityResult.aliases());
-                knowledgeGraphChunkAssociationRepository.saveAllAndFlush(entityResult.chunkAssociations());
-                knowledgeGraphRelationshipRepository.saveAllAndFlush(relationships);
-            });
-
-            neo4jGraphRepository.upsertGraph(
-                    document,
-                    chunks,
-                    entityResult.entities(),
-                    relationships,
-                    entityResult.chunkAssociations());
-
-            entityCount = entityResult.entities().size();
-            relationshipCount = relationships.size();
-            graphRagIndexLogService.markCompleted(logEntry, entityCount, relationshipCount, chunks.size());
-            log.info(
-                    "GraphRAG index completed: documentId={}, traceId={}, entityCount={}, relationshipCount={}, chunkCount={}",
-                    documentId,
-                    traceId,
-                    entityCount,
-                    relationshipCount,
-                    chunks.size());
-        } catch (RuntimeException ex) {
-            String summary = errorSummary(ex);
+            GraphRagIndexLog logEntry = graphRagIndexLogService.start(documentId, traceId, chunks.size());
+            int entityCount = 0;
+            int relationshipCount = 0;
+            int chunkEntityCount = 0;
             try {
-                graphRagIndexCleanupService.deleteByDocumentId(documentId, chunkIds(chunks), traceId);
-            } catch (RuntimeException cleanupEx) {
-                log.warn(
-                        "GraphRAG cleanup after failure also failed: documentId={}, traceId={}, error={}",
+                long extractionStarted = System.nanoTime();
+                List<GraphRagChunkExtraction> chunkExtractions = graphRagExtractionService.extract(document, chunks);
+                int extractedEntityCount = extractedEntityCount(chunkExtractions);
+                int extractedRelationshipCount = extractedRelationshipCount(chunkExtractions);
+                log.info(
+                        "GraphRAG extraction completed: documentId={}, traceId={}, chunkCount={}, entityCandidateCount={}, relationshipCandidateCount={}, durationMs={}",
                         documentId,
                         traceId,
-                        errorSummary(cleanupEx),
-                        cleanupEx);
-            }
-            graphRagIndexLogService.markFailed(logEntry, summary, entityCount, relationshipCount, chunks.size());
-            log.warn(
-                    "GraphRAG index failed: documentId={}, traceId={}, error={}",
-                    documentId,
-                    traceId,
-                    summary,
-                    ex);
-        }
+                        chunks.size(),
+                        extractedEntityCount,
+                        extractedRelationshipCount,
+                        elapsedMillis(extractionStarted));
 
-        return graphRagIndexLogService.latestSummary(documentId);
+                long normalizationStarted = System.nanoTime();
+                GraphRagEntityNormalizationResult entityResult = graphRagEntityNormalizer.normalize(document, chunkExtractions);
+                List<KnowledgeGraphRelationship> relationships = graphRagRelationshipNormalizer.normalize(
+                        documentId,
+                        chunkExtractions,
+                        entityResult.entityIdsByKey());
+                entityCount = entityResult.entities().size();
+                relationshipCount = relationships.size();
+                chunkEntityCount = entityResult.chunkAssociations().size();
+                log.info(
+                        "GraphRAG normalization completed: documentId={}, traceId={}, entityCount={}, aliasCount={}, relationshipCount={}, chunkEntityCount={}, durationMs={}",
+                        documentId,
+                        traceId,
+                        entityCount,
+                        entityResult.aliases().size(),
+                        relationshipCount,
+                        chunkEntityCount,
+                        elapsedMillis(normalizationStarted));
+
+                graphRagIndexCleanupService.deleteByDocumentId(documentId, chunkIds(chunks), traceId);
+
+                long postgresStarted = System.nanoTime();
+                transactionTemplate.executeWithoutResult(status -> {
+                    knowledgeGraphEntityRepository.saveAllAndFlush(entityResult.entities());
+                    knowledgeGraphEntityAliasRepository.saveAllAndFlush(entityResult.aliases());
+                    knowledgeGraphChunkAssociationRepository.saveAllAndFlush(entityResult.chunkAssociations());
+                    knowledgeGraphRelationshipRepository.saveAllAndFlush(relationships);
+                });
+                log.info(
+                        "GraphRAG PostgreSQL graph write completed: documentId={}, traceId={}, entityCount={}, relationshipCount={}, chunkEntityCount={}, durationMs={}",
+                        documentId,
+                        traceId,
+                        entityCount,
+                        relationshipCount,
+                        chunkEntityCount,
+                        elapsedMillis(postgresStarted));
+
+                long neo4jStarted = System.nanoTime();
+                neo4jGraphRepository.upsertGraph(
+                        document,
+                        chunks,
+                        entityResult.entities(),
+                        relationships,
+                        entityResult.chunkAssociations());
+                log.info(
+                        "GraphRAG Neo4j graph write completed: documentId={}, traceId={}, neo4jEnabled={}, entityCount={}, relationshipCount={}, chunkEntityCount={}, durationMs={}",
+                        documentId,
+                        traceId,
+                        logEntry.isNeo4jEnabled(),
+                        entityCount,
+                        relationshipCount,
+                        chunkEntityCount,
+                        elapsedMillis(neo4jStarted));
+
+                graphRagIndexLogService.markCompleted(
+                        logEntry,
+                        document.getBusinessDomain(),
+                        document.getPermissionLevel(),
+                        entityCount,
+                        relationshipCount,
+                        chunks.size(),
+                        chunkEntityCount);
+                log.info(
+                        "GraphRAG index completed: documentId={}, traceId={}, entityCount={}, relationshipCount={}, chunkCount={}, chunkEntityCount={}",
+                        documentId,
+                        traceId,
+                        entityCount,
+                        relationshipCount,
+                        chunks.size(),
+                        chunkEntityCount);
+            } catch (RuntimeException ex) {
+                String summary = errorSummary(ex);
+                try {
+                    graphRagIndexCleanupService.deleteByDocumentId(documentId, chunkIds(chunks), traceId);
+                } catch (RuntimeException cleanupEx) {
+                    log.warn(
+                            "GraphRAG cleanup after failure also failed: documentId={}, traceId={}, error={}",
+                            documentId,
+                            traceId,
+                            errorSummary(cleanupEx),
+                            cleanupEx);
+                }
+                graphRagIndexLogService.markFailed(
+                        logEntry,
+                        document.getBusinessDomain(),
+                        document.getPermissionLevel(),
+                        summary,
+                        entityCount,
+                        relationshipCount,
+                        chunks.size(),
+                        chunkEntityCount);
+                log.warn(
+                        "GraphRAG index failed: documentId={}, traceId={}, error={}",
+                        documentId,
+                        traceId,
+                        summary,
+                        ex);
+            }
+
+            return graphRagIndexLogService.latestSummary(documentId);
+        }
     }
 
     private DocumentEntity findDocument(UUID documentId) {
@@ -158,6 +230,22 @@ public class GraphRagIndexService {
 
     private List<UUID> chunkIds(List<DocumentChunkEntity> chunks) {
         return chunks.stream().map(DocumentChunkEntity::getId).toList();
+    }
+
+    private int extractedEntityCount(List<GraphRagChunkExtraction> chunkExtractions) {
+        return chunkExtractions.stream()
+                .mapToInt(extraction -> extraction.entities().size())
+                .sum();
+    }
+
+    private int extractedRelationshipCount(List<GraphRagChunkExtraction> chunkExtractions) {
+        return chunkExtractions.stream()
+                .mapToInt(extraction -> extraction.relationships().size())
+                .sum();
+    }
+
+    private long elapsedMillis(long startedNanos) {
+        return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
     }
 
     private String errorSummary(Exception ex) {

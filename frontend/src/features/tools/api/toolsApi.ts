@@ -4,6 +4,7 @@ import type {
   ToolInvocationDetail,
   ToolInvocationPage,
   ToolInvocationQuery,
+  ToolInvocationSummary,
 } from '@/features/tools/types'
 
 export const toolsApi = {
@@ -14,6 +15,11 @@ export const toolsApi = {
 
   async listInvocations(params: ToolInvocationQuery): Promise<ToolInvocationPage> {
     const { data } = await httpClient.get<ToolInvocationPage>('/tools/invocations', { params })
+    return data
+  },
+
+  async getInvocationSummary(params: ToolInvocationQuery): Promise<ToolInvocationSummary> {
+    const { data } = await httpClient.get<ToolInvocationSummary>('/observability/tool-invocations', { params })
     return data
   },
 

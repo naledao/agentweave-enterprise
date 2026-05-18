@@ -10,7 +10,13 @@
   >
     <el-table-column label="工具" min-width="180">
       <template #default="{ row }: { row: ToolInvocation }">
+        <span class="tool-name">{{ row.toolName }}</span>
         <span class="monospace-text">{{ row.toolCode }}</span>
+      </template>
+    </el-table-column>
+    <el-table-column label="类型" width="120">
+      <template #default="{ row }: { row: ToolInvocation }">
+        {{ formatToolType(row.toolType) }}
       </template>
     </el-table-column>
     <el-table-column label="调用人" min-width="150">
@@ -88,6 +94,20 @@ function formatDuration(value: number | null): string {
   return `${value} ms`
 }
 
+function formatToolType(value: ToolInvocation['toolType']): string {
+  const map: Record<ToolInvocation['toolType'], string> = {
+    BUSINESS_QUERY: '业务查询',
+    LOG_SEARCH: '日志检索',
+    DATABASE_READ: '数据库只读',
+    ENDPOINT_STATUS: '接口状态',
+    NOTIFICATION: '消息通知',
+    MCP_RESOURCE: 'MCP 资源',
+    SCRIPT: '脚本',
+    UNKNOWN: '未知',
+  }
+  return map[value] ?? value
+}
+
 function openInvocation(row: ToolInvocation): void {
   emit('open', row)
 }
@@ -113,6 +133,15 @@ function openInvocation(row: ToolInvocation): void {
   color: #48566b;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-name {
+  display: block;
+  overflow: hidden;
+  color: #263143;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

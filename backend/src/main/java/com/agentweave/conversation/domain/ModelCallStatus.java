@@ -1,6 +1,8 @@
 package com.agentweave.conversation.domain;
 
 public enum ModelCallStatus {
-    SUCCEEDED,
-    FAILED
+    SUCCESS,
+    FAILED,
+    TIMEOUT,
+    CANCELLED
 }

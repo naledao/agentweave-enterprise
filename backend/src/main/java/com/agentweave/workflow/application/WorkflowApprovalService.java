@@ -139,6 +139,7 @@ public class WorkflowApprovalService {
                 requestSummary(planStep),
                 run.getUserId());
         WorkflowApprovalEntity saved = approvalRepository.save(approval);
+        agentStepService.waitForApproval(stepEntity.getId());
         workflowRunService.transitionTo(run.getId(), WorkflowRunStatus.WAITING_APPROVAL);
         auditLogService.recordWorkflowApprovalCreated(saved.getId(), run.getId(), run.getUserId(), saved.getToolCode());
         return saved;

@@ -11,6 +11,7 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
@@ -63,7 +64,7 @@ public class SpringAiConversationAiClient implements ConversationAiClient {
     }
 
     @Override
-    public Flux<String> streamAnswer(ConversationPrompt prompt) {
+    public Flux<ConversationAiChunk> streamAnswer(ConversationPrompt prompt) {
         conversationMemoryService.syncBeforeModelCall(prompt);
         String traceId = MDC.get(TraceIdProvider.TRACE_ID_KEY);
         String conversationId = prompt.conversationId().toString();
@@ -72,7 +73,7 @@ public class SpringAiConversationAiClient implements ConversationAiClient {
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, prompt.conversationId().toString()))
                 .user(buildUserPrompt(prompt))
                 .stream()
-                .content()
+                .chatResponse()
                 .doOnSubscribe(ignored -> log.info(
                         "Provider stream subscribed: traceId={}, conversationId={}, messageId={}",
                         traceId,
@@ -84,7 +85,42 @@ public class SpringAiConversationAiClient implements ConversationAiClient {
                         conversationId,
                         messageId))
                 .doFinally(signalType -> logProviderStreamFinished(traceId, conversationId, messageId, signalType))
-                .filter(chunk -> chunk != null && !chunk.isBlank());
+                .map(this::toChunk)
+                .filter(chunk -> chunk.hasContent() || chunk.hasMetadata());
+    }
+
+    private ConversationAiChunk toChunk(ChatResponse chatResponse) {
+        String content = content(chatResponse);
+        ConversationAiResponse metadata = responseMetadata(chatResponse);
+        return new ConversationAiChunk(content, metadata);
+    }
+
+    private String content(ChatResponse chatResponse) {
+        if (chatResponse == null || chatResponse.getResult() == null) {
+            return "";
+        }
+        Generation generation = chatResponse.getResult();
+        if (generation.getOutput() == null || generation.getOutput().getText() == null) {
+            return "";
+        }
+        return generation.getOutput().getText();
+    }
+
+    private ConversationAiResponse responseMetadata(ChatResponse chatResponse) {
+        if (chatResponse == null || chatResponse.getMetadata() == null) {
+            return null;
+        }
+        ChatResponseMetadata metadata = chatResponse.getMetadata();
+        Usage usage = metadata.getUsage();
+        if ((metadata.getModel() == null || metadata.getModel().isBlank()) && usage == null) {
+            return null;
+        }
+        return new ConversationAiResponse(
+                "",
+                PROVIDER,
+                model(metadata),
+                promptTokens(usage),
+                completionTokens(usage));
     }
 
     private String buildUserPrompt(ConversationPrompt prompt) {

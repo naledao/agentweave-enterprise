@@ -14,6 +14,8 @@ import com.agentweave.knowledge.messaging.publisher.DocumentUploadedEventPublish
 import com.agentweave.knowledge.repository.DocumentChunkRepository;
 import com.agentweave.knowledge.repository.DocumentRepository;
 import com.agentweave.graphrag.application.GraphRagIndexLogService;
+import com.agentweave.shared.audit.AuditEventType;
+import com.agentweave.shared.audit.AuditLog;
 import com.agentweave.shared.exception.BusinessException;
 import com.agentweave.shared.exception.ErrorCode;
 import com.agentweave.shared.exception.ResourceNotFoundException;
@@ -113,6 +115,11 @@ public class DocumentApplicationService {
     }
 
     @Transactional
+    @AuditLog(
+            eventType = AuditEventType.DOCUMENT_UPLOAD,
+            resourceType = "document",
+            resourceId = "#result.documentId",
+            includeResponse = false)
     public DocumentResponse upload(MultipartFile file, CreateDocumentRequest request) {
         CurrentUser user = currentUserService.requireCurrentUser();
         currentUserService.requirePermission(UPLOAD_PERMISSION);

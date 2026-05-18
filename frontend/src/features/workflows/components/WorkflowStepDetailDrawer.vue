@@ -19,8 +19,16 @@
             <dd>{{ step.nodeName || '-' }}</dd>
           </div>
           <div>
+            <dt>角色</dt>
+            <dd>{{ step.agentRole || '-' }}</dd>
+          </div>
+          <div>
             <dt>状态</dt>
             <dd><WorkflowStepStatusTag :status="step.status" /></dd>
+          </div>
+          <div>
+            <dt>traceId</dt>
+            <dd><TraceIdText v-if="step.traceId" :trace-id="step.traceId" /><span v-else>-</span></dd>
           </div>
           <div>
             <dt>耗时</dt>
@@ -120,6 +128,7 @@ import WorkflowCitationList from '@/features/workflows/components/WorkflowCitati
 import WorkflowGraphPathList from '@/features/workflows/components/WorkflowGraphPathList.vue'
 import WorkflowStepStatusTag from '@/features/workflows/components/WorkflowStepStatusTag.vue'
 import WorkflowToolCallList from '@/features/workflows/components/WorkflowToolCallList.vue'
+import TraceIdText from '@/shared/components/TraceIdText.vue'
 import type { WorkflowApproval, WorkflowStep } from '@/features/workflows/types'
 
 defineProps<{

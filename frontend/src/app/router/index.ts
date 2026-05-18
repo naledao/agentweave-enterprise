@@ -82,6 +82,16 @@ export const router = createRouter({
           meta: { requiresAuth: true, title: '工作流详情' },
         },
         {
+          path: 'observability',
+          name: 'Observability',
+          component: () => import('@/features/observability/views/ObservabilityDashboardView.vue'),
+          meta: {
+            requiresAuth: true,
+            permissions: ['observability:read'],
+            title: '监控观测',
+          },
+        },
+        {
           path: 'settings/users',
           name: 'Users',
           component: () => import('@/features/settings/views/UserManagementView.vue'),

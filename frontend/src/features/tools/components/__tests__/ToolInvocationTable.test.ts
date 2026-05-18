@@ -11,6 +11,8 @@ describe('ToolInvocationTable', () => {
         invocations: [
           toolInvocation({
             toolCode: 'ticket.query',
+            toolName: '工单查询',
+            toolType: 'BUSINESS_QUERY',
             username: 'alice',
             status: 'success',
             durationMs: 128,
@@ -18,6 +20,8 @@ describe('ToolInvocationTable', () => {
           }),
           toolInvocation({
             toolCode: 'log.search',
+            toolName: '日志检索',
+            toolType: 'LOG_SEARCH',
             username: 'bob',
             status: 'failed',
             errorMessage: '日志服务超时',
@@ -27,11 +31,14 @@ describe('ToolInvocationTable', () => {
       },
     })
 
-    expect(await screen.findByText('ticket.query')).toBeInTheDocument()
+    expect(await screen.findByText('工单查询')).toBeInTheDocument()
+    expect(screen.getByText('ticket.query')).toBeInTheDocument()
+    expect(screen.getByText('业务查询')).toBeInTheDocument()
     expect(screen.getByText('alice')).toBeInTheDocument()
     expect(screen.getByText('成功')).toBeInTheDocument()
     expect(screen.getByText('128 ms')).toBeInTheDocument()
     expect(screen.getByText('log.search')).toBeInTheDocument()
+    expect(screen.getAllByText('日志检索')).toHaveLength(2)
     expect(screen.getByText('失败')).toBeInTheDocument()
     expect(screen.getByText('日志服务超时')).toBeInTheDocument()
     expect(screen.getByText('trace-failed')).toBeInTheDocument()
@@ -42,10 +49,15 @@ function toolInvocation(overrides: Partial<ToolInvocation>): ToolInvocation {
   return {
     id: crypto.randomUUID(),
     toolCode: 'tool.code',
+    toolName: 'Tool',
+    toolType: 'UNKNOWN',
+    riskLevel: null,
     userId: crypto.randomUUID(),
     username: 'user',
     conversationId: null,
     messageId: null,
+    workflowRunId: null,
+    workflowStepId: null,
     inputSummary: '{"keyword":"demo"}',
     resultSummary: '{"count":1}',
     status: 'running',

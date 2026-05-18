@@ -9,11 +9,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 @Component
 public class RagContextMerger {
 
+    private static final Logger log = LoggerFactory.getLogger(RagContextMerger.class);
     private static final String VECTOR_ONLY = "VECTOR_ONLY";
     private static final String GRAPH_ONLY = "GRAPH_ONLY";
     private static final String HYBRID = "HYBRID";
@@ -28,14 +31,23 @@ public class RagContextMerger {
             String plannedRetrievalMode,
             List<VectorRagCitationResponse> vectorCitations,
             List<GraphPathResponse> graphPaths) {
+        long started = System.nanoTime();
         List<CitationEventResponse> citations = deduplicate(vectorCitations).stream()
                 .map(this::toCitation)
                 .toList();
         List<GraphPathResponse> deduplicatedGraphPaths = deduplicateGraphPaths(graphPaths);
         String retrievalMode = retrievalMode(plannedRetrievalMode, citations, deduplicatedGraphPaths);
+        String promptContext = buildPromptContext(citations, deduplicatedGraphPaths);
+        log.info(
+                "RAG context merge completed: retrievalMode={}, vectorCitationCount={}, graphPathCount={}, sourceChunkCount={}, durationMs={}",
+                retrievalMode,
+                citations.size(),
+                deduplicatedGraphPaths.size(),
+                sourceChunkCount(deduplicatedGraphPaths),
+                elapsedMillis(started));
         return new RagPromptContext(
                 retrievalMode,
-                buildPromptContext(citations, deduplicatedGraphPaths),
+                promptContext,
                 citations,
                 deduplicatedGraphPaths);
     }
@@ -194,5 +206,16 @@ public class RagContextMerger {
 
     private String valueOrUnknown(String value) {
         return value == null || value.isBlank() ? "unknown" : value;
+    }
+
+    private int sourceChunkCount(List<GraphPathResponse> graphPaths) {
+        return (int) graphPaths.stream()
+                .flatMap(graphPath -> graphPath.sourceChunkIds().stream())
+                .distinct()
+                .count();
+    }
+
+    private long elapsedMillis(long startedNanos) {
+        return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
     }
 }

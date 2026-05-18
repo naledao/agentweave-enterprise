@@ -43,6 +43,9 @@ class WorkflowRunServiceTest {
     @Mock
     private TraceIdProvider traceIdProvider;
 
+    @Mock
+    private WorkflowMetricsService workflowMetricsService;
+
     @InjectMocks
     private WorkflowRunService workflowRunService;
 

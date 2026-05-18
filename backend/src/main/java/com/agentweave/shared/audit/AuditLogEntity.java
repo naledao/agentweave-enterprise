@@ -32,6 +32,12 @@ public class AuditLogEntity {
     @Column(length = 120)
     private String targetId;
 
+    @Column(length = 80)
+    private String resourceType;
+
+    @Column(length = 120)
+    private String resourceId;
+
     @Column(nullable = false, length = 120)
     private String action;
 
@@ -41,6 +47,17 @@ public class AuditLogEntity {
 
     @Column(length = 500)
     private String reason;
+
+    private Long durationMs;
+
+    @Column(length = 1000)
+    private String requestSummary;
+
+    @Column(length = 1000)
+    private String responseSummary;
+
+    @Column(length = 500)
+    private String errorMessage;
 
     @Column(length = 64)
     private String ipAddress;
@@ -77,9 +94,48 @@ public class AuditLogEntity {
         this.username = username;
         this.targetType = targetType;
         this.targetId = targetId;
+        this.resourceType = targetType;
+        this.resourceId = targetId;
         this.action = action;
         this.result = result;
         this.reason = reason;
+        this.errorMessage = reason;
+        this.ipAddress = ipAddress;
+        this.userAgent = userAgent;
+        this.traceId = traceId;
+    }
+
+    public AuditLogEntity(
+            UUID id,
+            AuditEventType eventType,
+            UUID userId,
+            String username,
+            String resourceType,
+            String resourceId,
+            String action,
+            AuditResult result,
+            Long durationMs,
+            String requestSummary,
+            String responseSummary,
+            String errorMessage,
+            String ipAddress,
+            String userAgent,
+            String traceId) {
+        this.id = id;
+        this.eventType = eventType;
+        this.userId = userId;
+        this.username = username;
+        this.targetType = resourceType;
+        this.targetId = resourceId;
+        this.resourceType = resourceType;
+        this.resourceId = resourceId;
+        this.action = action;
+        this.result = result;
+        this.reason = errorMessage;
+        this.durationMs = durationMs;
+        this.requestSummary = requestSummary;
+        this.responseSummary = responseSummary;
+        this.errorMessage = errorMessage;
         this.ipAddress = ipAddress;
         this.userAgent = userAgent;
         this.traceId = traceId;
@@ -109,6 +165,14 @@ public class AuditLogEntity {
         return targetId;
     }
 
+    public String getResourceType() {
+        return resourceType == null ? targetType : resourceType;
+    }
+
+    public String getResourceId() {
+        return resourceId == null ? targetId : resourceId;
+    }
+
     public String getAction() {
         return action;
     }
@@ -119,6 +183,22 @@ public class AuditLogEntity {
 
     public String getReason() {
         return reason;
+    }
+
+    public Long getDurationMs() {
+        return durationMs;
+    }
+
+    public String getRequestSummary() {
+        return requestSummary;
+    }
+
+    public String getResponseSummary() {
+        return responseSummary;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage == null ? reason : errorMessage;
     }
 
     public String getIpAddress() {

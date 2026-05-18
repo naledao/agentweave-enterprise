@@ -54,6 +54,15 @@
     </main>
 
     <aside ref="contextPanelRef" class="context-panel" tabindex="-1">
+      <ObservationSummaryPanel
+        :message="latestAssistantMessage"
+        :stream="streamState"
+        :conversation-trace-id="activeConversation?.traceId ?? null"
+        :citations="activeCitations"
+        :graph-paths="activeGraphPaths"
+        :tool-invocations="activeToolInvocations"
+        :workflow-steps="activeWorkflowSteps"
+      />
       <AssistantGenerationPanel :messages="assistantPlaceholders" />
       <CitationPanel
         ref="citationPanelRef"
@@ -65,8 +74,8 @@
         :graph-paths="activeGraphPaths"
         hide-when-empty
       />
-      <ToolCallPanel :invocations="streamState.toolInvocations" />
-      <WorkflowStepPanel :steps="streamState.workflowSteps" />
+      <ToolCallPanel :invocations="activeToolInvocations" />
+      <WorkflowStepPanel :steps="activeWorkflowSteps" />
     </aside>
   </section>
 </template>
@@ -84,6 +93,7 @@ import ChatMessageList from '@/features/chat/components/ChatMessageList.vue'
 import CitationPanel from '@/features/chat/components/CitationPanel.vue'
 import ConversationList from '@/features/chat/components/ConversationList.vue'
 import GraphPathPanel from '@/features/chat/components/GraphPathPanel.vue'
+import ObservationSummaryPanel from '@/features/chat/components/ObservationSummaryPanel.vue'
 import ToolCallPanel from '@/features/chat/components/ToolCallPanel.vue'
 import WorkflowStepPanel from '@/features/chat/components/WorkflowStepPanel.vue'
 import { createInitialStreamState, reduceStreamEvent } from '@/features/chat/composables/streamReducer'
@@ -228,6 +238,14 @@ const activeGraphPaths = computed(() => {
 
   return latestAssistantMessage.value?.graphPaths ?? []
 })
+const activeToolInvocations = computed(() => {
+  if (streamState.toolInvocations.length > 0 || isStreaming.value || streamState.status === 'failed') {
+    return streamState.toolInvocations
+  }
+
+  return latestAssistantMessage.value?.toolCalls ?? []
+})
+const activeWorkflowSteps = computed(() => streamState.workflowSteps)
 const citationEmptyText = computed(() => {
   if (latestAssistantMessage.value?.status === 'SUCCEEDED' || streamState.status === 'completed') {
     return '本次回答没有返回引用资料'
@@ -310,8 +328,6 @@ function stopStream(options: { notifyServer: boolean; detached?: boolean }): voi
   const streamTask = activeStreamTask.value
   const conversationId = streamTask?.conversationId ?? activeConversationId.value
   const messageId = streamTask?.messageId ?? activeAssistantMessageId.value ?? streamState.assistantMessageId
-  streamConnection.value?.close()
-  streamConnection.value = null
   if (isStreaming.value) {
     assignStreamState({ ...streamState, status: 'cancelled' })
   }
@@ -320,11 +336,18 @@ function stopStream(options: { notifyServer: boolean; detached?: boolean }): voi
       activeStreamTask.value = null
       activeAssistantMessageId.value = null
       void conversationsApi.cancelMessage(conversationId, messageId)
+      streamConnection.value?.close()
+      streamConnection.value = null
       return
     }
 
     cancelMessageMutation.mutate({ conversationId, messageId })
+    streamConnection.value?.close()
+    streamConnection.value = null
+    return
   }
+  streamConnection.value?.close()
+  streamConnection.value = null
 }
 
 async function ensureConversation(): Promise<string> {

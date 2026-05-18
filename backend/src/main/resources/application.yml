@@ -34,6 +34,14 @@ spring:
     url: ${AGENTWEAVE_DATASOURCE_URL:jdbc:postgresql://localhost:5432/agentweave}
     username: ${AGENTWEAVE_DATASOURCE_USERNAME:agentweave}
     password: ${AGENTWEAVE_DATASOURCE_PASSWORD}
+  data:
+    redis:
+      repositories:
+        enabled: false
+      host: ${AGENTWEAVE_REDIS_HOST:14.103.202.40}
+      port: ${AGENTWEAVE_REDIS_PORT:6379}
+      password: ${AGENTWEAVE_REDIS_PASSWORD:}
+      timeout: ${AGENTWEAVE_REDIS_TIMEOUT:2s}
   rabbitmq:
     host: ${AGENTWEAVE_RABBITMQ_HOST:localhost}
     port: ${AGENTWEAVE_RABBITMQ_PORT:5672}
@@ -71,6 +79,10 @@ logging:
     level: "%5p traceId=%X{traceId:-} userId=%X{userId:-} conversationId=%X{conversationId:-} messageId=%X{messageId:-} toolCallId=%X{toolCallId:-} workflowRunId=%X{workflowRunId:-} workflowStepId=%X{workflowStepId:-}"
 
 management:
+  prometheus:
+    metrics:
+      export:
+        enabled: true
   endpoints:
     web:
       exposure:
@@ -79,6 +91,12 @@ management:
     health:
       probes:
         enabled: true
+      group:
+        readiness:
+          include: readinessState,db,redis,minio,modelProvider,vectorStore,neo4j
+          show-details: when-authorized
+        liveness:
+          include: livenessState
 
 agentweave:
   security:

@@ -20,11 +20,12 @@ public class AgentConfiguration {
     private String baseUrl;
 
     @Bean
-    public ChatModel agentChatModel() {
+    public ChatModel agentChatModel(AgentModelObservation agentModelObservation) {
         return OpenAiChatModel.builder()
                 .apiKey(apiKey)
                 .modelName(modelName)
                 .baseUrl(baseUrl)
+                .listeners(java.util.List.of(agentModelObservation))
                 .build();
     }
 

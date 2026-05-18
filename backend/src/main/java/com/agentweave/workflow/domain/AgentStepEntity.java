@@ -12,12 +12,12 @@ import jakarta.persistence.Table;
 import com.agentweave.workflow.dto.WorkflowReviewResult;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
-import java.util.List;
 
 @Entity
 @Table(name = "agent_steps")
@@ -39,6 +39,13 @@ public class AgentStepEntity {
 
     @Column(name = "node_name", length = 80)
     private String nodeName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "agent_role", length = 40)
+    private AgentRole agentRole;
+
+    @Column(name = "trace_id", length = 120)
+    private String traceId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 40)
@@ -103,6 +110,8 @@ public class AgentStepEntity {
         this.stepIndex = stepIndex;
         this.stepType = stepType;
         this.nodeName = nodeName;
+        this.agentRole = defaultAgentRole(stepType);
+        this.traceId = run == null ? null : run.getTraceId();
         this.status = AgentStepStatus.PENDING;
     }
 
@@ -141,10 +150,16 @@ public class AgentStepEntity {
         calculateDuration();
     }
 
+    public void waitForApproval(Instant now) {
+        this.status = AgentStepStatus.WAITING_APPROVAL;
+        this.startedAt = this.startedAt == null ? now : this.startedAt;
+    }
+
     public void recordRetry(String reason, Instant now) {
         this.retryCount++;
         this.retryReason = reason;
         this.lastRetriedAt = now;
+        this.status = AgentStepStatus.RETRYING;
     }
 
     private void calculateDuration() {
@@ -171,6 +186,14 @@ public class AgentStepEntity {
 
     public String getNodeName() {
         return nodeName;
+    }
+
+    public AgentRole getAgentRole() {
+        return agentRole;
+    }
+
+    public String getTraceId() {
+        return traceId;
     }
 
     public AgentStepStatus getStatus() {
@@ -239,5 +262,18 @@ public class AgentStepEntity {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    private AgentRole defaultAgentRole(AgentStepType stepType) {
+        if (stepType == null) {
+            return AgentRole.SYSTEM;
+        }
+        return switch (stepType) {
+            case PLANNING -> AgentRole.PLANNER;
+            case REVIEW, FINAL_ANSWER -> AgentRole.REVIEWER;
+            case HUMAN_APPROVAL -> AgentRole.APPROVAL;
+            case CHECKPOINT, ERROR -> AgentRole.SYSTEM;
+            default -> AgentRole.EXECUTOR;
+        };
     }
 }

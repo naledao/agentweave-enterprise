@@ -29,6 +29,8 @@ public class TraceIdFilter extends OncePerRequestFilter {
             MDC.remove(TraceIdProvider.TRACE_ID_KEY);
             MDC.remove(CorrelationContext.CONVERSATION_ID_KEY);
             MDC.remove(CorrelationContext.MESSAGE_ID_KEY);
+            MDC.remove(CorrelationContext.WORKFLOW_RUN_ID_KEY);
+            MDC.remove(CorrelationContext.WORKFLOW_STEP_ID_KEY);
         }
     }
 }

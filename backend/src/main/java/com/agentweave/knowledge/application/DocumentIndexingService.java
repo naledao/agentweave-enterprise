@@ -8,6 +8,8 @@ import com.agentweave.knowledge.dto.DocumentResponse;
 import com.agentweave.knowledge.messaging.publisher.DocumentReindexRequestedEventPublisher;
 import com.agentweave.knowledge.repository.DocumentChunkRepository;
 import com.agentweave.knowledge.repository.DocumentRepository;
+import com.agentweave.shared.audit.AuditEventType;
+import com.agentweave.shared.audit.AuditLog;
 import com.agentweave.shared.exception.BusinessException;
 import com.agentweave.shared.exception.ErrorCode;
 import com.agentweave.shared.exception.ResourceNotFoundException;
@@ -56,6 +58,11 @@ public class DocumentIndexingService {
         this.reindexRequestedEventPublisherProvider = reindexRequestedEventPublisherProvider;
     }
 
+    @AuditLog(
+            eventType = AuditEventType.DOCUMENT_INDEX,
+            resourceType = "document",
+            resourceId = "#documentId",
+            includeResponse = false)
     public DocumentResponse indexDocument(UUID documentId) {
         return indexDocument(documentId, false);
     }
@@ -120,6 +127,11 @@ public class DocumentIndexingService {
         }
     }
 
+    @AuditLog(
+            eventType = AuditEventType.DOCUMENT_INDEX,
+            resourceType = "document",
+            resourceId = "#documentId",
+            includeResponse = false)
     public DocumentResponse reindexDocument(UUID documentId) {
         CurrentUser user = currentUserService.requireCurrentUser();
         currentUserService.requirePermission(INDEX_PERMISSION);

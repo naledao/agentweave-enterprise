@@ -42,4 +42,53 @@ class CorrelationContextTest {
             assertThat(correlationContext.current()).contains(traceContext);
         }
     }
+
+    @Test
+    void shouldOpenScopeFromWorkflowTraceContext() {
+        TraceContext traceContext = new TraceContext(
+                "workflow-context-trace",
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID());
+
+        try (CorrelationContext.Scope ignored = correlationContext.open(traceContext)) {
+            assertThat(correlationContext.current()).contains(traceContext);
+        }
+    }
+
+    @Test
+    void shouldExposeWorkflowCorrelationInCurrentTraceContext() {
+        UUID workflowRunId = UUID.randomUUID();
+        UUID workflowStepId = UUID.randomUUID();
+
+        try (CorrelationContext.Scope ignored =
+                correlationContext.openWorkflow("workflow-trace", workflowRunId, workflowStepId)) {
+            assertThat(correlationContext.current())
+                    .contains(TraceContext.ofWorkflow("workflow-trace", workflowRunId, workflowStepId));
+        }
+    }
+
+    @Test
+    void shouldExposeConversationAndWorkflowCorrelationTogether() {
+        UUID conversationId = UUID.randomUUID();
+        UUID messageId = UUID.randomUUID();
+        UUID workflowRunId = UUID.randomUUID();
+        UUID workflowStepId = UUID.randomUUID();
+
+        try (CorrelationContext.Scope ignored = correlationContext.openWorkflow(
+                "workflow-trace",
+                conversationId,
+                messageId,
+                workflowRunId,
+                workflowStepId)) {
+            assertThat(correlationContext.current())
+                    .contains(new TraceContext(
+                            "workflow-trace",
+                            conversationId,
+                            messageId,
+                            workflowRunId,
+                            workflowStepId));
+        }
+    }
 }

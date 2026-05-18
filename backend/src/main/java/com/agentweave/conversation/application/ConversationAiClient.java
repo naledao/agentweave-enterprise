@@ -6,5 +6,5 @@ public interface ConversationAiClient {
 
     ConversationAiResponse answer(ConversationPrompt prompt);
 
-    Flux<String> streamAnswer(ConversationPrompt prompt);
+    Flux<ConversationAiChunk> streamAnswer(ConversationPrompt prompt);
 }

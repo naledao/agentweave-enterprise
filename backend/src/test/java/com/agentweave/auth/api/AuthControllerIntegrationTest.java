@@ -17,6 +17,7 @@ import com.agentweave.auth.repository.RoleRepository;
 import com.agentweave.auth.repository.UserRepository;
 import com.agentweave.shared.audit.AuditEventType;
 import com.agentweave.shared.audit.AuditLogRepository;
+import com.agentweave.shared.audit.AuditResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
@@ -257,6 +258,30 @@ class AuthControllerIntegrationTest {
                         .content(passwordBody))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("AUTH_403"));
+    }
+
+    @Test
+    void validationFailureWritesAuditLog() throws Exception {
+        String invalidBody = objectMapper.writeValueAsString(Map.of(
+                "displayName", "Invalid User",
+                "email", "not-an-email"));
+
+        mockMvc.perform(put("/api/v1/users/{id}", aliceId)
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidBody))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON_400"));
+
+        org.assertj.core.api.Assertions.assertThat(auditLogRepository.findByEventTypeAndUsernameOrderByCreatedAtDesc(
+                        AuditEventType.VALIDATION_FAILED,
+                        adminUsername))
+                .anySatisfy(log -> {
+                    org.assertj.core.api.Assertions.assertThat(log.getResourceType()).isEqualTo("HTTP");
+                    org.assertj.core.api.Assertions.assertThat(log.getResourceId()).isEqualTo("/api/v1/users/" + aliceId);
+                    org.assertj.core.api.Assertions.assertThat(log.getResult()).isEqualTo(AuditResult.DENIED);
+                    org.assertj.core.api.Assertions.assertThat(log.getErrorMessage()).contains("email");
+                });
     }
 
     @Test

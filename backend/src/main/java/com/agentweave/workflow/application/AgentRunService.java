@@ -12,9 +12,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class AgentRunService {
 
     private final WorkflowRunRepository workflowRunRepository;
+    private final WorkflowMetricsService workflowMetricsService;
 
-    public AgentRunService(WorkflowRunRepository workflowRunRepository) {
+    public AgentRunService(
+            WorkflowRunRepository workflowRunRepository,
+            WorkflowMetricsService workflowMetricsService) {
         this.workflowRunRepository = workflowRunRepository;
+        this.workflowMetricsService = workflowMetricsService;
     }
 
     @Transactional
@@ -46,7 +50,8 @@ public class AgentRunService {
         AgentRunEntity run = workflowRunRepository.findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
         run.succeed(finalAnswer, Instant.now());
-        workflowRunRepository.save(run);
+        AgentRunEntity saved = workflowRunRepository.save(run);
+        workflowMetricsService.recordRunCompleted(saved);
     }
 
     @Transactional
@@ -54,7 +59,8 @@ public class AgentRunService {
         AgentRunEntity run = workflowRunRepository.findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
         run.fail(errorCode, errorMessage, Instant.now());
-        workflowRunRepository.save(run);
+        AgentRunEntity saved = workflowRunRepository.save(run);
+        workflowMetricsService.recordRunCompleted(saved);
     }
 
     @Transactional
@@ -62,6 +68,7 @@ public class AgentRunService {
         AgentRunEntity run = workflowRunRepository.findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
         run.cancel(Instant.now());
-        workflowRunRepository.save(run);
+        AgentRunEntity saved = workflowRunRepository.save(run);
+        workflowMetricsService.recordRunCompleted(saved);
     }
 }

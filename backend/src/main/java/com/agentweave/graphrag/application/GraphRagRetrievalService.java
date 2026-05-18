@@ -8,6 +8,8 @@ import com.agentweave.graphrag.dto.GraphRagRetrievalRequest;
 import com.agentweave.graphrag.dto.GraphRagRetrievalResponse;
 import com.agentweave.conversation.application.ConversationPrompt;
 import com.agentweave.shared.security.CurrentUserService;
+import com.agentweave.shared.audit.AuditEventType;
+import com.agentweave.shared.audit.AuditLog;
 import com.agentweave.shared.tracing.CorrelationContext;
 import com.agentweave.shared.tracing.TraceIdProvider;
 import com.agentweave.springai.rag.dto.VectorRagCitationResponse;
@@ -52,33 +54,66 @@ public class GraphRagRetrievalService {
         this.traceIdProvider = traceIdProvider;
     }
 
+    @AuditLog(
+            eventType = AuditEventType.GRAPHRAG_RETRIEVAL,
+            resourceType = "conversation",
+            resourceId = "#prompt.conversationId",
+            includeResponse = false)
     public GraphRagRetrievalResponse retrieve(ConversationPrompt prompt, VectorRagSearchResponse vectorResponse) {
         currentUserService.requireCurrentUser();
         currentUserService.requirePermission(SEARCH_PERMISSION);
 
         GraphRagRetrievalRequest request = buildRequest(prompt, vectorResponse);
+        String traceId = currentTraceId();
+        String mode = retrievalMode(vectorResponse);
         GraphRagRetrievalLog logEntry = graphRagRetrievalLogService.start(
                 prompt.conversationId(),
                 currentMessageId(),
-                currentTraceId(),
+                traceId,
                 request.normalizedQuery(),
                 request.normalizedBusinessDomain(),
                 request.normalizedPermissionLevel(),
                 request.documentId(),
+                mode,
                 request.maxDepth(),
                 request.maxPathCount(),
                 List.of());
         try {
+            long loadStarted = System.nanoTime();
+            List<KnowledgeGraphEntity> entities = knowledgeGraphEntityRepository.findAll();
+            List<KnowledgeGraphEntityAlias> aliases = knowledgeGraphEntityAliasRepository.findAll();
+            List<KnowledgeGraphRelationship> relationships = knowledgeGraphRelationshipRepository.findAll();
+            log.info(
+                    "GraphRAG retrieval graph data loaded: conversationId={}, traceId={}, retrievalMode={}, entityCount={}, aliasCount={}, relationshipCount={}, durationMs={}",
+                    prompt.conversationId(),
+                    traceId,
+                    mode,
+                    entities.size(),
+                    aliases.size(),
+                    relationships.size(),
+                    elapsedMillis(loadStarted));
+
+            long searchStarted = System.nanoTime();
             GraphRagRetrievalResponse response = graphPathSearchService.search(
                     request,
-                    knowledgeGraphEntityRepository.findAll(),
-                    knowledgeGraphEntityAliasRepository.findAll(),
-                    knowledgeGraphRelationshipRepository.findAll());
+                    entities,
+                    aliases,
+                    relationships);
+            log.info(
+                    "GraphRAG retrieval path search completed: conversationId={}, traceId={}, retrievalMode={}, resolvedEntityCount={}, matchedPathCount={}, filteredPathCount={}, sourceChunkCount={}, durationMs={}",
+                    prompt.conversationId(),
+                    traceId,
+                    mode,
+                    response.resolvedEntities().size(),
+                    response.matchedPathCount(),
+                    response.filteredPathCount(),
+                    response.sourceChunkIds().size(),
+                    elapsedMillis(searchStarted));
             graphRagRetrievalLogService.markCompleted(logEntry, response);
             return response;
         } catch (RuntimeException ex) {
             String summary = errorSummary(ex);
-            graphRagRetrievalLogService.markFailed(logEntry, summary);
+            graphRagRetrievalLogService.markDegraded(logEntry, summary);
             log.warn(
                     "GraphRAG retrieval failed: conversationId={}, traceId={}, error={}",
                     prompt.conversationId(),
@@ -121,6 +156,13 @@ public class GraphRagRetrievalService {
         return ids.size() == 1 ? ids.get(0) : null;
     }
 
+    private String retrievalMode(VectorRagSearchResponse vectorResponse) {
+        if (vectorResponse == null || vectorResponse.retrievalMode() == null || vectorResponse.retrievalMode().isBlank()) {
+            return "GRAPH_ONLY";
+        }
+        return vectorResponse.retrievalMode();
+    }
+
     private String currentTraceId() {
         String traceId = MDC.get(TraceIdProvider.TRACE_ID_KEY);
         return traceId == null || traceId.isBlank() ? traceIdProvider.currentTraceId() : traceId;
@@ -141,6 +183,10 @@ public class GraphRagRetrievalService {
     private String requestTraceId() {
         String traceId = MDC.get(TraceIdProvider.TRACE_ID_KEY);
         return traceId == null || traceId.isBlank() ? "unknown" : traceId;
+    }
+
+    private long elapsedMillis(long startedNanos) {
+        return Math.max(0, (System.nanoTime() - startedNanos) / 1_000_000);
     }
 
     private String errorSummary(Exception ex) {

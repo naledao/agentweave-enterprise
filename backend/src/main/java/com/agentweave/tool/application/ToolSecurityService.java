@@ -107,7 +107,7 @@ public class ToolSecurityService implements DisposableBean {
         ToolDefinitionEntity definition = toolDefinitionService.findByPermissionCode(permissionCode)
                 .orElse(null);
         String toolCode = definition == null ? permissionCode : definition.getCode();
-        ToolInvocationEntity invocationRecord = toolInvocationService.start(toolCode, user, method, arguments);
+        ToolInvocationEntity invocationRecord = toolInvocationService.start(definition, toolCode, user, method, arguments);
         if (definition == null) {
             ToolPermissionDeniedException ex = deny(user, permissionCode, "Tool is not whitelisted");
             toolInvocationService.markDenied(invocationRecord.getId(), ex.getMessage());

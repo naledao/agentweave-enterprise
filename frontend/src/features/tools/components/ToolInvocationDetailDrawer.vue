@@ -23,8 +23,23 @@
           <h3>基础信息</h3>
           <dl class="detail-list">
             <div>
+              <dt>工具名称</dt>
+              <dd>{{ invocation.toolName }}</dd>
+            </div>
+            <div>
               <dt>工具编码</dt>
               <dd class="monospace-text">{{ invocation.toolCode }}</dd>
+            </div>
+            <div>
+              <dt>工具类型</dt>
+              <dd>{{ formatToolType(invocation.toolType) }}</dd>
+            </div>
+            <div>
+              <dt>风险等级</dt>
+              <dd>
+                <ToolRiskTag v-if="invocation.riskLevel" :risk-level="invocation.riskLevel" />
+                <span v-else>-</span>
+              </dd>
             </div>
             <div>
               <dt>调用人</dt>
@@ -54,6 +69,14 @@
               <dt>消息 ID</dt>
               <dd class="monospace-text">{{ invocation.messageId || '-' }}</dd>
             </div>
+            <div>
+              <dt>工作流 Run</dt>
+              <dd class="monospace-text">{{ invocation.workflowRunId || '-' }}</dd>
+            </div>
+            <div>
+              <dt>工作流 Step</dt>
+              <dd class="monospace-text">{{ invocation.workflowStepId || '-' }}</dd>
+            </div>
           </dl>
           <TraceIdText v-if="invocation.traceId" :trace-id="invocation.traceId" />
         </section>
@@ -81,6 +104,7 @@
 
 <script setup lang="ts">
 import ToolInvocationStatusTag from '@/features/tools/components/ToolInvocationStatusTag.vue'
+import ToolRiskTag from '@/features/tools/components/ToolRiskTag.vue'
 import type { ToolInvocationDetail } from '@/features/tools/types'
 import TraceIdText from '@/shared/components/TraceIdText.vue'
 
@@ -118,6 +142,20 @@ function formatDuration(value: number | null): string {
   }
 
   return `${value} ms`
+}
+
+function formatToolType(value: ToolInvocationDetail['toolType']): string {
+  const map: Record<ToolInvocationDetail['toolType'], string> = {
+    BUSINESS_QUERY: '业务查询',
+    LOG_SEARCH: '日志检索',
+    DATABASE_READ: '数据库只读',
+    ENDPOINT_STATUS: '接口状态',
+    NOTIFICATION: '消息通知',
+    MCP_RESOURCE: 'MCP 资源',
+    SCRIPT: '脚本',
+    UNKNOWN: '未知',
+  }
+  return map[value] ?? value
 }
 </script>
 

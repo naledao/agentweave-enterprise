@@ -1,12 +1,13 @@
 package com.agentweave.workflow.application;
 
 import com.agentweave.shared.exception.ResourceNotFoundException;
+import com.agentweave.shared.audit.AuditEventType;
+import com.agentweave.shared.audit.AuditLog;
 import com.agentweave.shared.security.CurrentUser;
 import com.agentweave.shared.security.CurrentUserService;
 import com.agentweave.shared.tracing.TraceIdProvider;
 import com.agentweave.workflow.domain.AgentRunEntity;
 import com.agentweave.workflow.domain.AgentStepEntity;
-import com.agentweave.workflow.domain.AgentStepStatus;
 import com.agentweave.workflow.domain.AgentStepType;
 import com.agentweave.workflow.domain.WorkflowRunStatus;
 import com.agentweave.workflow.domain.WorkflowStatusMachine;
@@ -36,19 +37,27 @@ public class WorkflowRunService {
     private final AgentStepRepository agentStepRepository;
     private final CurrentUserService currentUserService;
     private final TraceIdProvider traceIdProvider;
+    private final WorkflowMetricsService workflowMetricsService;
 
     public WorkflowRunService(
             WorkflowRunRepository workflowRunRepository,
             AgentStepRepository agentStepRepository,
             CurrentUserService currentUserService,
-            TraceIdProvider traceIdProvider) {
+            TraceIdProvider traceIdProvider,
+            WorkflowMetricsService workflowMetricsService) {
         this.workflowRunRepository = workflowRunRepository;
         this.agentStepRepository = agentStepRepository;
         this.currentUserService = currentUserService;
         this.traceIdProvider = traceIdProvider;
+        this.workflowMetricsService = workflowMetricsService;
     }
 
     @Transactional
+    @AuditLog(
+            eventType = AuditEventType.WORKFLOW_START,
+            resourceType = "workflow",
+            resourceId = "#result.runId",
+            includeResponse = false)
     public WorkflowRunResponse create(CreateWorkflowRunRequest request) {
         CurrentUser user = currentUserService.requireCurrentUser();
 
@@ -107,6 +116,7 @@ public class WorkflowRunService {
         run.cancel(Instant.now());
 
         AgentRunEntity saved = workflowRunRepository.save(run);
+        workflowMetricsService.recordRunCompleted(saved);
         return WorkflowRunResponse.from(saved);
     }
 
@@ -131,17 +141,24 @@ public class WorkflowRunService {
         AgentRunEntity run = require(runId);
         WorkflowStatusMachine.validateTransition(run.getStatus(), WorkflowRunStatus.SUCCEEDED);
         run.succeed(finalAnswer, Instant.now());
-        workflowRunRepository.save(run);
+        AgentRunEntity saved = workflowRunRepository.save(run);
+        workflowMetricsService.recordRunCompleted(saved);
     }
 
     @Transactional
+    @AuditLog(
+            eventType = AuditEventType.WORKFLOW_FAILURE,
+            resourceType = "workflow",
+            resourceId = "#runId",
+            includeResponse = false)
     public void markFailed(UUID runId, String errorCode, String errorMessage) {
         AgentRunEntity run = require(runId);
         if (run.getStatus() != WorkflowRunStatus.FAILED) {
             WorkflowStatusMachine.validateTransition(run.getStatus(), WorkflowRunStatus.FAILED);
         }
         run.fail(errorCode, errorMessage, Instant.now());
-        workflowRunRepository.save(run);
+        AgentRunEntity saved = workflowRunRepository.save(run);
+        workflowMetricsService.recordRunCompleted(saved);
     }
 
     @Transactional

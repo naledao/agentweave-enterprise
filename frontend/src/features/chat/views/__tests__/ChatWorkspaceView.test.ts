@@ -117,8 +117,8 @@ describe('ChatWorkspaceView', () => {
     await nextTick()
 
     expect(closeStream).toHaveBeenCalled()
-    expect(screen.getByText('SSE stream timed out')).toBeInTheDocument()
-    expect(screen.getByText('trace-timeout')).toBeInTheDocument()
+    expect(screen.getAllByText('SSE stream timed out').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('trace-timeout').length).toBeGreaterThanOrEqual(1)
     expect(container.querySelector('.streaming-message .el-tag--danger')).toBeInTheDocument()
   })
 

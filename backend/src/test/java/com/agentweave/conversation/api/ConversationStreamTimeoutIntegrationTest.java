@@ -20,9 +20,11 @@ import com.agentweave.auth.repository.PermissionRepository;
 import com.agentweave.auth.repository.RoleRepository;
 import com.agentweave.auth.repository.UserRepository;
 import com.agentweave.conversation.application.ConversationAiClient;
+import com.agentweave.conversation.application.ConversationAiChunk;
 import com.agentweave.conversation.domain.ConversationMessageEntity;
 import com.agentweave.conversation.domain.MessageStatus;
 import com.agentweave.conversation.domain.ModelCallLogEntity;
+import com.agentweave.conversation.domain.ModelCallScenario;
 import com.agentweave.conversation.domain.ModelCallStatus;
 import com.agentweave.conversation.repository.ConversationMessageRepository;
 import com.agentweave.conversation.repository.ModelCallLogRepository;
@@ -154,11 +156,12 @@ class ConversationStreamTimeoutIntegrationTest {
         ModelCallLogEntity timeoutLog = modelCallLogRepository
                 .findFirstByConversationIdOrderByCreatedAtDesc(conversationId)
                 .orElseThrow();
-        assertThat(timeoutLog.getStatus()).isEqualTo(ModelCallStatus.FAILED);
+        assertThat(timeoutLog.getStatus()).isEqualTo(ModelCallStatus.TIMEOUT);
+        assertThat(timeoutLog.getScenario()).isEqualTo(ModelCallScenario.CHAT_STREAM);
         assertThat(timeoutLog.getTraceId()).isEqualTo(traceId);
 
         when(conversationAiClient.streamAnswer(any()))
-                .thenReturn(Flux.just("stream after timeout"));
+                .thenReturn(Flux.just(ConversationAiChunk.content("stream after timeout")));
         UUID secondConversationId = createConversation("SSE after timeout cleanup");
         sendStreamMessage(secondConversationId, "start after timeout");
 

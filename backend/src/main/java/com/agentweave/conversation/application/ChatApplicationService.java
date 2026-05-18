@@ -1,5 +1,6 @@
 package com.agentweave.conversation.application;
 
+import com.agentweave.conversation.domain.ModelCallScenario;
 import com.agentweave.conversation.dto.ResponseMode;
 import com.agentweave.conversation.dto.SendMessageRequest;
 import com.agentweave.conversation.dto.SendMessageResponse;
@@ -74,8 +75,11 @@ public class ChatApplicationService {
                         conversationId,
                         created.assistantMessageId(),
                         response,
+                        promptSummary(prompt),
+                        responseSummary(response.content()),
                         latencyMs,
-                        created.traceId());
+                        created.traceId(),
+                        scenario(ragContext, ModelCallScenario.CHAT_SYNC));
                 return new SendMessageResponse(
                         created.conversationId(),
                         created.userMessageId(),
@@ -97,6 +101,7 @@ public class ChatApplicationService {
                         created.assistantMessageId(),
                         PROVIDER,
                         MODEL,
+                        scenario(ragContext, ModelCallScenario.CHAT_SYNC),
                         latencyMs,
                         ex,
                         created.traceId());
@@ -107,5 +112,29 @@ public class ChatApplicationService {
 
     private long elapsedMillis(long startedAt) {
         return Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+    }
+
+    private ModelCallScenario scenario(RagPromptContext ragContext, ModelCallScenario fallback) {
+        if (ragContext != null && (ragContext.hasCitations() || ragContext.hasGraphPaths())) {
+            return ModelCallScenario.RAG_ANSWER;
+        }
+        return fallback;
+    }
+
+    private String promptSummary(ConversationPrompt prompt) {
+        RagPromptContext ragContext = prompt.ragContext();
+        int citations = ragContext == null ? 0 : ragContext.citations().size();
+        int graphPaths = ragContext == null ? 0 : ragContext.graphPaths().size();
+        String retrievalMode = ragContext == null ? "UNKNOWN" : ragContext.retrievalMode();
+        int messageLength = prompt.latestUserMessage() == null ? 0 : prompt.latestUserMessage().length();
+        return "conversationId=" + prompt.conversationId()
+                + ";messageLength=" + messageLength
+                + ";retrievalMode=" + retrievalMode
+                + ";citations=" + citations
+                + ";graphPaths=" + graphPaths;
+    }
+
+    private String responseSummary(String content) {
+        return "contentLength=" + (content == null ? 0 : content.length());
     }
 }

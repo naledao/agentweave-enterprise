@@ -12,6 +12,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
 
 @Service
 public class AuditLogService {
@@ -23,21 +24,48 @@ public class AuditLogService {
     private final ObjectProvider<HttpServletRequest> requestProvider;
     private final TraceIdProvider traceIdProvider;
     private final CurrentUserService currentUserService;
+    private final AuditSummarySanitizer auditSummarySanitizer;
 
     public AuditLogService(
             AuditLogRepository auditLogRepository,
             ObjectProvider<HttpServletRequest> requestProvider,
             TraceIdProvider traceIdProvider,
-            CurrentUserService currentUserService) {
+            CurrentUserService currentUserService,
+            AuditSummarySanitizer auditSummarySanitizer) {
         this.auditLogRepository = auditLogRepository;
         this.requestProvider = requestProvider;
         this.traceIdProvider = traceIdProvider;
         this.currentUserService = currentUserService;
+        this.auditSummarySanitizer = auditSummarySanitizer;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void record(AuditLogCommand command) {
+        HttpServletRequest request = currentRequest();
+        AuditLogEntity entity = new AuditLogEntity(
+                UUID.randomUUID(),
+                command.eventType(),
+                command.userId(),
+                command.username(),
+                command.resourceType(),
+                command.resourceId(),
+                command.action(),
+                command.result(),
+                command.durationMs(),
+                auditSummarySanitizer.sanitizeText(command.requestSummary()),
+                auditSummarySanitizer.sanitizeText(command.responseSummary()),
+                auditSummarySanitizer.sanitizeText(command.errorMessage(), 500),
+                ipAddress(request),
+                userAgent(request),
+                traceId(request));
+        auditLogRepository.save(entity);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordLoginSuccess(UUID userId, String username) {
         save(AuditEventType.LOGIN_SUCCESS, userId, username, "USER",
+                userId.toString(), "LOGIN", AuditResult.SUCCESS, null);
+        save(AuditEventType.AUTH_LOGIN_SUCCESS, userId, username, "USER",
                 userId.toString(), "LOGIN", AuditResult.SUCCESS, null);
     }
 
@@ -45,6 +73,8 @@ public class AuditLogService {
     public void recordLoginFailure(String username, String reason) {
         save(AuditEventType.LOGIN_FAILED, null, username, "USER", username,
                 "LOGIN", AuditResult.FAILED, reason);
+        save(AuditEventType.AUTH_LOGIN_FAILURE, null, username, "USER", username,
+                "LOGIN", AuditResult.FAILURE, reason);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -57,6 +87,19 @@ public class AuditLogService {
     public void recordPermissionDenied(String targetType, String targetId, String action, String reason) {
         Optional<CurrentUser> currentUser = currentUserService.getCurrentUser();
         save(AuditEventType.PERMISSION_DENIED,
+                currentUser.map(CurrentUser::id).orElse(null),
+                currentUser.map(CurrentUser::username).orElse(null),
+                targetType,
+                targetId,
+                action,
+                AuditResult.DENIED,
+                reason);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordValidationFailed(String targetType, String targetId, String action, String reason) {
+        Optional<CurrentUser> currentUser = currentUserService.getCurrentUser();
+        save(AuditEventType.VALIDATION_FAILED,
                 currentUser.map(CurrentUser::id).orElse(null),
                 currentUser.map(CurrentUser::username).orElse(null),
                 targetType,
@@ -244,7 +287,7 @@ public class AuditLogService {
             String action,
             AuditResult result,
             String reason) {
-        HttpServletRequest request = requestProvider.getIfAvailable();
+        HttpServletRequest request = currentRequest();
         AuditLogEntity entity = new AuditLogEntity(
                 UUID.randomUUID(),
                 eventType,
@@ -254,7 +297,7 @@ public class AuditLogService {
                 targetId,
                 action,
                 result,
-                reason,
+                truncateReason(reason),
                 ipAddress(request),
                 userAgent(request),
                 traceId(request));
@@ -268,11 +311,15 @@ public class AuditLogService {
         return traceIdProvider.currentTraceId(request);
     }
 
-    private String truncateReason(String reason) {
-        if (reason == null || reason.length() <= 500) {
-            return reason;
+    private HttpServletRequest currentRequest() {
+        if (RequestContextHolder.getRequestAttributes() == null) {
+            return null;
         }
-        return reason.substring(0, 500);
+        return requestProvider.getIfAvailable();
+    }
+
+    private String truncateReason(String reason) {
+        return auditSummarySanitizer.sanitizeText(reason, 500);
     }
 
     private String ipAddress(HttpServletRequest request) {

@@ -21,7 +21,15 @@ export type WorkflowStepType =
   | 'CHECKPOINT'
   | 'ERROR'
 
-export type WorkflowStepStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'SKIPPED'
+export type WorkflowStepStatus =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'WAITING_APPROVAL'
+  | 'RETRYING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'SKIPPED'
+export type WorkflowAgentRole = 'PLANNER' | 'EXECUTOR' | 'REVIEWER' | 'APPROVAL' | 'SYSTEM'
 export type WorkflowApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'
 export type ToolRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
 
@@ -47,6 +55,8 @@ export interface WorkflowStep {
   stepIndex: number
   stepType: WorkflowStepType
   nodeName: string | null
+  agentRole: WorkflowAgentRole | null
+  traceId: string | null
   status: WorkflowStepStatus
   inputSummary: string | null
   outputSummary: string | null

@@ -2,8 +2,11 @@ package com.agentweave.workflow.node;
 
 import com.agentweave.conversation.application.ConversationPrompt;
 import com.agentweave.conversation.application.ConversationRagService;
+import com.agentweave.conversation.application.ModelCallLogService;
 import com.agentweave.conversation.application.RagPromptContext;
+import com.agentweave.conversation.domain.ModelCallStatus;
 import com.agentweave.graphrag.dto.GraphPathResponse;
+import com.agentweave.langchain4j.agent.AgentModelObservation;
 import com.agentweave.langchain4j.agent.AgentPromptTemplateService;
 import com.agentweave.langchain4j.agent.ExecutorAgent;
 import com.agentweave.langchain4j.agent.PlannerAgent;
@@ -12,11 +15,13 @@ import com.agentweave.tool.application.ToolDefinitionService;
 import com.agentweave.tool.application.ToolRiskEvaluator;
 import com.agentweave.tool.domain.ToolDefinitionEntity;
 import com.agentweave.tool.domain.ToolRiskLevel;
+import com.agentweave.shared.tracing.CorrelationContext;
 import com.agentweave.workflow.application.AgentStepService;
 import com.agentweave.workflow.application.PlanValidator;
 import com.agentweave.workflow.application.WorkflowApprovalService;
 import com.agentweave.workflow.application.WorkflowCheckpointService;
 import com.agentweave.workflow.application.WorkflowRunService;
+import com.agentweave.workflow.application.WorkflowToolExecutionService;
 import com.agentweave.workflow.domain.AgentRunEntity;
 import com.agentweave.workflow.domain.AgentStepEntity;
 import com.agentweave.workflow.domain.AgentStepType;
@@ -27,6 +32,8 @@ import com.agentweave.workflow.dto.WorkflowPlanStep;
 import com.agentweave.workflow.dto.WorkflowReviewResult;
 import com.agentweave.workflow.graph.WorkflowNodeNames;
 import com.agentweave.workflow.state.AgentWorkflowState;
+import dev.langchain4j.model.output.TokenUsage;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,6 +41,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -53,6 +61,12 @@ public class WorkflowNodeExecutor {
     private final ToolDefinitionService toolDefinitionService;
     private final ToolRiskEvaluator toolRiskEvaluator;
     private final WorkflowApprovalService approvalService;
+    private final WorkflowToolExecutionService workflowToolExecutionService;
+    private final ModelCallLogService modelCallLogService;
+    private final AgentModelObservation agentModelObservation;
+    private final CorrelationContext correlationContext;
+    private final String agentProvider;
+    private final String agentModelName;
 
     public WorkflowNodeExecutor(
             PlannerAgent plannerAgent,
@@ -66,7 +80,12 @@ public class WorkflowNodeExecutor {
             WorkflowCheckpointService checkpointService,
             ToolDefinitionService toolDefinitionService,
             ToolRiskEvaluator toolRiskEvaluator,
-            WorkflowApprovalService approvalService) {
+            WorkflowApprovalService approvalService,
+            WorkflowToolExecutionService workflowToolExecutionService,
+            ModelCallLogService modelCallLogService,
+            AgentModelObservation agentModelObservation,
+            CorrelationContext correlationContext,
+            @Value("${langchain4j.open-ai.chat-model.model-name:unknown}") String agentModelName) {
         this.plannerAgent = plannerAgent;
         this.executorAgent = executorAgent;
         this.reviewerAgent = reviewerAgent;
@@ -79,6 +98,12 @@ public class WorkflowNodeExecutor {
         this.toolDefinitionService = toolDefinitionService;
         this.toolRiskEvaluator = toolRiskEvaluator;
         this.approvalService = approvalService;
+        this.workflowToolExecutionService = workflowToolExecutionService;
+        this.modelCallLogService = modelCallLogService;
+        this.agentModelObservation = agentModelObservation;
+        this.correlationContext = correlationContext;
+        this.agentProvider = "openai";
+        this.agentModelName = agentModelName;
     }
 
     public Map<String, Object> loadContext(AgentWorkflowState state) {
@@ -87,20 +112,22 @@ public class WorkflowNodeExecutor {
     }
 
     public Map<String, Object> planner(AgentWorkflowState state) {
+        AgentStepEntity step = null;
         try {
             transitionIfNeeded(state.runId(), WorkflowRunStatus.PLANNING);
             AgentRunEntity run = workflowRunService.getEntityById(state.runId());
-            AgentStepEntity step = createAndStartStep(run, 0, AgentStepType.PLANNING, WorkflowNodeNames.PLANNER);
+            step = createAndStartStep(run, 0, AgentStepType.PLANNING, WorkflowNodeNames.PLANNER);
             agentStepService.recordInputSummary(step.getId(), "goal=" + run.getGoal());
 
             String context = promptTemplateService.buildPlannerContext(run.getGoal(), null);
-            WorkflowPlan plan = plannerAgent.createPlan(run.getGoal(), context);
+            WorkflowPlan plan = callPlannerAgent(run, step, context);
             agentStepService.completeStep(step.getId(), "Plan created with " + plan.steps().size() + " steps");
 
             Map<String, Object> updates = Map.of(AgentWorkflowState.PLAN, plan);
             checkpointService.save(WorkflowNodeNames.PLANNER, updated(state, updates));
             return updates;
         } catch (Exception ex) {
+            failStepIfStarted(step, "PLANNING_FAILED", ex.getMessage());
             return fail(state, WorkflowNodeNames.PLANNER, null, "PLANNING_FAILED", ex, false);
         }
     }
@@ -131,8 +158,8 @@ public class WorkflowNodeExecutor {
 
     public Map<String, Object> rag(AgentWorkflowState state) {
         WorkflowPlanStep step = currentStep(state);
-        return executeStep(state, step, WorkflowNodeNames.RAG_NODE, AgentStepType.RAG_SEARCH, () -> {
-            AgentExecutionResult agentResult = executeWithAgent(state, step);
+        return executeStep(state, step, WorkflowNodeNames.RAG_NODE, AgentStepType.RAG_SEARCH, stepEntity -> {
+            AgentExecutionResult agentResult = executeWithAgent(state, step, stepEntity);
             RagPromptContext ragContext = conversationRagService.retrieve(new ConversationPrompt(
                     state.conversationId(),
                     "Workflow " + state.runId(),
@@ -153,8 +180,8 @@ public class WorkflowNodeExecutor {
 
     public Map<String, Object> graphRag(AgentWorkflowState state) {
         WorkflowPlanStep step = currentStep(state);
-        return executeStep(state, step, WorkflowNodeNames.GRAPH_RAG_NODE, AgentStepType.GRAPH_RAG_SEARCH, () -> {
-            AgentExecutionResult agentResult = executeWithAgent(state, step);
+        return executeStep(state, step, WorkflowNodeNames.GRAPH_RAG_NODE, AgentStepType.GRAPH_RAG_SEARCH, stepEntity -> {
+            AgentExecutionResult agentResult = executeWithAgent(state, step, stepEntity);
             RagPromptContext ragContext = conversationRagService.retrieve(new ConversationPrompt(
                     state.conversationId(),
                     "Workflow " + state.runId(),
@@ -173,15 +200,17 @@ public class WorkflowNodeExecutor {
 
     public Map<String, Object> tool(AgentWorkflowState state) {
         WorkflowPlanStep step = currentStep(state);
-        return executeStep(state, step, WorkflowNodeNames.TOOL_NODE, AgentStepType.TOOL_CALL, () -> executeTool(state, step));
+        return executeStep(state, step, WorkflowNodeNames.TOOL_NODE, AgentStepType.TOOL_CALL,
+                stepEntity -> executeTool(state, step, stepEntity));
     }
 
     public Map<String, Object> humanApproval(AgentWorkflowState state) {
         WorkflowPlanStep step = currentStep(state);
+        AgentStepEntity stepEntity = null;
         try {
             transitionToExecuting(state.runId());
             AgentRunEntity run = workflowRunService.getEntityById(state.runId());
-            AgentStepEntity stepEntity = createAndStartStep(run, nextPersistedStepIndex(run), AgentStepType.HUMAN_APPROVAL, WorkflowNodeNames.HUMAN_APPROVAL_NODE);
+            stepEntity = createAndStartStep(run, nextPersistedStepIndex(run), AgentStepType.HUMAN_APPROVAL, WorkflowNodeNames.HUMAN_APPROVAL_NODE);
             agentStepService.recordInputSummary(stepEntity.getId(), inputSummary(step));
             ToolRiskLevel riskLevel = toolRiskEvaluator.evaluate(step);
             var approval = approvalService.createPendingApproval(run, stepEntity, step, riskLevel);
@@ -194,18 +223,21 @@ public class WorkflowNodeExecutor {
             checkpointService.save(WorkflowNodeNames.HUMAN_APPROVAL_NODE, updated(state, updates));
             return updates;
         } catch (Exception ex) {
+            failStepIfStarted(stepEntity, "APPROVAL_NODE_FAILED", ex.getMessage());
             return fail(state, WorkflowNodeNames.HUMAN_APPROVAL_NODE, step, "APPROVAL_NODE_FAILED", ex, true);
         }
     }
 
     public Map<String, Object> reviewer(AgentWorkflowState state) {
+        AgentStepEntity step = null;
         try {
             transitionToReviewing(state.runId());
             AgentRunEntity run = workflowRunService.getEntityById(state.runId());
-            AgentStepEntity step = createAndStartStep(run, nextPersistedStepIndex(run), AgentStepType.REVIEW, WorkflowNodeNames.REVIEWER);
+            step = createAndStartStep(run, nextPersistedStepIndex(run), AgentStepType.REVIEW, WorkflowNodeNames.REVIEWER);
             agentStepService.recordInputSummary(step.getId(),
                     "goal=" + run.getGoal() + "; stepResults=" + state.stepResults().size());
-            WorkflowReviewResult reviewResult = reviewerAgent.review(run.getGoal(), formatStepResultsForReview(state.stepResults()));
+            String stepResults = formatStepResultsForReview(state.stepResults());
+            WorkflowReviewResult reviewResult = callReviewerAgent(run, step, stepResults);
             agentStepService.completeStep(step.getId(), reviewResult.summary());
 
             String finalAnswer = reviewResult.finalAnswer() == null || reviewResult.finalAnswer().isBlank()
@@ -219,6 +251,7 @@ public class WorkflowNodeExecutor {
             checkpointService.save(WorkflowNodeNames.REVIEWER, updated(state, updates));
             return updates;
         } catch (Exception ex) {
+            failStepIfStarted(step, "REVIEW_FAILED", ex.getMessage());
             return fail(state, WorkflowNodeNames.REVIEWER, null, "REVIEW_FAILED", ex, true);
         }
     }
@@ -251,12 +284,21 @@ public class WorkflowNodeExecutor {
             String nodeName,
             AgentStepType stepType,
             StepCallable callable) {
+        AgentStepEntity stepEntity = null;
         try {
             transitionToExecuting(state.runId());
             AgentRunEntity run = workflowRunService.getEntityById(state.runId());
-            AgentStepEntity stepEntity = createAndStartStep(run, nextPersistedStepIndex(run), stepType, nodeName);
+            stepEntity = createAndStartStep(run, nextPersistedStepIndex(run), stepType, nodeName);
             agentStepService.recordInputSummary(stepEntity.getId(), inputSummary(step));
-            AgentExecutionResult result = callable.execute();
+            AgentExecutionResult result;
+            try (CorrelationContext.Scope ignored = correlationContext.openWorkflow(
+                    run.getTraceId(),
+                    run.getConversationId(),
+                    null,
+                    run.getId(),
+                    stepEntity.getId())) {
+                result = callable.execute(stepEntity);
+            }
             if (!result.success()) {
                 agentStepService.failStep(stepEntity.getId(), "STEP_EXECUTION_FAILED", result.errorMessage());
                 return fail(state, nodeName, step, "STEP_EXECUTION_FAILED", result.errorMessage(), true);
@@ -271,23 +313,191 @@ public class WorkflowNodeExecutor {
             checkpointService.save(nodeName, updated(state, updates));
             return updates;
         } catch (Exception ex) {
+            failStepIfStarted(stepEntity, "STEP_EXECUTION_ERROR", ex.getMessage());
             return fail(state, nodeName, step, "STEP_EXECUTION_ERROR", ex, true);
         }
     }
 
-    private AgentExecutionResult executeWithAgent(AgentWorkflowState state, WorkflowPlanStep step) {
+    private void failStepIfStarted(AgentStepEntity step, String errorCode, String errorMessage) {
+        if (step == null) {
+            return;
+        }
+        try {
+            agentStepService.failStep(step.getId(), errorCode, errorMessage);
+        } catch (RuntimeException failure) {
+            log.warn(
+                    "Workflow step failure persistence failed: stepId={}, error={}",
+                    step.getId(),
+                    failure.getMessage(),
+                    failure);
+        }
+    }
+
+    private AgentExecutionResult executeWithAgent(
+            AgentWorkflowState state,
+            WorkflowPlanStep step,
+            AgentStepEntity stepEntity) {
         String context = promptTemplateService.buildExecutorContext(
                 step.instruction(),
                 step.toolCode(),
                 step.retrievalMode(),
                 promptTemplateService.formatStepResults(previousResultMap(state.stepResults())));
-        return executorAgent.executeStep(
-                step.stepIndex(),
-                step.stepType().name(),
-                step.instruction(),
-                step.toolCode(),
-                step.retrievalMode(),
-                context);
+        AgentRunEntity run = workflowRunService.getEntityById(state.runId());
+        return callExecutorAgent(run, stepEntity, step, context);
+    }
+
+    private WorkflowPlan callPlannerAgent(AgentRunEntity run, AgentStepEntity step, String context) {
+        long startedAt = System.nanoTime();
+        String promptSummary = "goal=" + run.getGoal() + ";context=" + context;
+        try {
+            WorkflowPlan plan = plannerAgent.createPlan(run.getGoal(), context);
+            TokenUsage tokenUsage = currentTokenUsage();
+            modelCallLogService.recordAgentCall(
+                    run.getConversationId(),
+                    null,
+                    agentProvider,
+                    agentModelName,
+                    promptSummary,
+                    "steps=" + plan.steps().size(),
+                    inputTokens(tokenUsage),
+                    outputTokens(tokenUsage),
+                    elapsedMillis(startedAt),
+                    ModelCallStatus.SUCCESS,
+                    null,
+                    null,
+                    run.getTraceId(),
+                    "PLANNER",
+                    run.getId(),
+                    step.getId());
+            return plan;
+        } catch (RuntimeException ex) {
+            recordAgentFailure(run, step, "PLANNER", promptSummary, startedAt, "PLANNER_FAILED", ex);
+            throw ex;
+        } finally {
+            agentModelObservation.clear();
+        }
+    }
+
+    private AgentExecutionResult callExecutorAgent(
+            AgentRunEntity run,
+            AgentStepEntity stepEntity,
+            WorkflowPlanStep step,
+            String context) {
+        long startedAt = System.nanoTime();
+        String promptSummary = "stepIndex=" + step.stepIndex()
+                + ";stepType=" + step.stepType()
+                + ";instruction=" + nullSafe(step.instruction())
+                + ";toolCode=" + nullSafe(step.toolCode())
+                + ";retrievalMode=" + nullSafe(step.retrievalMode())
+                + ";context=" + context;
+        try {
+            AgentExecutionResult result = executorAgent.executeStep(
+                    step.stepIndex(),
+                    step.stepType().name(),
+                    step.instruction(),
+                    step.toolCode(),
+                    step.retrievalMode(),
+                    context);
+            TokenUsage tokenUsage = currentTokenUsage();
+            modelCallLogService.recordAgentCall(
+                    run.getConversationId(),
+                    null,
+                    agentProvider,
+                    agentModelName,
+                    promptSummary,
+                    result == null ? null : result.outputSummary(),
+                    inputTokens(tokenUsage),
+                    outputTokens(tokenUsage),
+                    elapsedMillis(startedAt),
+                    ModelCallStatus.SUCCESS,
+                    null,
+                    null,
+                    run.getTraceId(),
+                    "EXECUTOR",
+                    run.getId(),
+                    stepEntity.getId());
+            return result;
+        } catch (RuntimeException ex) {
+            recordAgentFailure(run, stepEntity, "EXECUTOR", promptSummary, startedAt, "EXECUTOR_FAILED", ex);
+            throw ex;
+        } finally {
+            agentModelObservation.clear();
+        }
+    }
+
+    private WorkflowReviewResult callReviewerAgent(AgentRunEntity run, AgentStepEntity step, String stepResults) {
+        long startedAt = System.nanoTime();
+        String promptSummary = "goal=" + run.getGoal() + ";stepResults=" + stepResults;
+        try {
+            WorkflowReviewResult result = reviewerAgent.review(run.getGoal(), stepResults);
+            TokenUsage tokenUsage = currentTokenUsage();
+            modelCallLogService.recordAgentCall(
+                    run.getConversationId(),
+                    null,
+                    agentProvider,
+                    agentModelName,
+                    promptSummary,
+                    result == null ? null : result.summary(),
+                    inputTokens(tokenUsage),
+                    outputTokens(tokenUsage),
+                    elapsedMillis(startedAt),
+                    ModelCallStatus.SUCCESS,
+                    null,
+                    null,
+                    run.getTraceId(),
+                    "REVIEWER",
+                    run.getId(),
+                    step.getId());
+            return result;
+        } catch (RuntimeException ex) {
+            recordAgentFailure(run, step, "REVIEWER", promptSummary, startedAt, "REVIEWER_FAILED", ex);
+            throw ex;
+        } finally {
+            agentModelObservation.clear();
+        }
+    }
+
+    private void recordAgentFailure(
+            AgentRunEntity run,
+            AgentStepEntity step,
+            String agentStage,
+            String promptSummary,
+            long startedAt,
+            String errorCode,
+            RuntimeException ex) {
+        modelCallLogService.recordAgentCall(
+                run.getConversationId(),
+                null,
+                agentProvider,
+                agentModelName,
+                promptSummary,
+                null,
+                null,
+                null,
+                elapsedMillis(startedAt),
+                ModelCallStatus.FAILED,
+                errorCode,
+                ex.getMessage(),
+                run.getTraceId(),
+                agentStage,
+                run.getId(),
+                step == null ? null : step.getId());
+    }
+
+    private TokenUsage currentTokenUsage() {
+        return agentModelObservation.currentTokenUsage();
+    }
+
+    private Integer inputTokens(TokenUsage tokenUsage) {
+        return tokenUsage == null ? null : tokenUsage.inputTokenCount();
+    }
+
+    private Integer outputTokens(TokenUsage tokenUsage) {
+        return tokenUsage == null ? null : tokenUsage.outputTokenCount();
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
     }
 
     private Map<String, Object> stepUpdates(AgentWorkflowState state, AgentExecutionResult result, String approvalStatus) {
@@ -344,7 +554,7 @@ public class WorkflowNodeExecutor {
         return plan.steps().get(state.currentStepIndex());
     }
 
-    private AgentExecutionResult executeTool(AgentWorkflowState state, WorkflowPlanStep step) {
+    private AgentExecutionResult executeTool(AgentWorkflowState state, WorkflowPlanStep step, AgentStepEntity stepEntity) {
         String toolCode = nullSafe(step.toolCode()).toLowerCase();
         ToolDefinitionEntity definition = step.toolCode() == null
                 ? null
@@ -357,21 +567,7 @@ public class WorkflowNodeExecutor {
         if (!List.of("tool:ticket:query", "tool:log:search", "tool:api-status:query").contains(toolCode)) {
             return AgentExecutionResult.failure("Unsupported tool code: " + step.toolCode());
         }
-        AgentExecutionResult prepared = executeWithAgent(state, step);
-        WorkflowReviewResult.ToolCallResult toolCallResult = new WorkflowReviewResult.ToolCallResult(
-                step.toolCode(),
-                Map.of("instruction", step.instruction()),
-                prepared.outputSummary(),
-                true,
-                null);
-        return new AgentExecutionResult(
-                true,
-                prepared.outputSummary(),
-                safeCitations(prepared),
-                safeGraphPaths(prepared),
-                List.of(toolCallResult),
-                null,
-                Map.of("toolCode", step.toolCode()));
+        return workflowToolExecutionService.execute(state, step, stepEntity);
     }
 
     private AgentStepEntity createAndStartStep(AgentRunEntity run, int stepIndex, AgentStepType stepType, String nodeName) {
@@ -563,6 +759,6 @@ public class WorkflowNodeExecutor {
 
     @FunctionalInterface
     private interface StepCallable {
-        AgentExecutionResult execute();
+        AgentExecutionResult execute(AgentStepEntity stepEntity);
     }
 }

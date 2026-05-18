@@ -3,6 +3,7 @@ package com.agentweave.workflow.dto;
 import com.agentweave.workflow.domain.AgentStepEntity;
 import com.agentweave.workflow.domain.AgentStepStatus;
 import com.agentweave.workflow.domain.AgentStepType;
+import com.agentweave.workflow.domain.AgentRole;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,8 @@ public record WorkflowStepResponse(
         int stepIndex,
         AgentStepType stepType,
         String nodeName,
+        AgentRole agentRole,
+        String traceId,
         AgentStepStatus status,
         String inputSummary,
         String outputSummary,
@@ -35,6 +38,8 @@ public record WorkflowStepResponse(
                 entity.getStepIndex(),
                 entity.getStepType(),
                 entity.getNodeName(),
+                entity.getAgentRole(),
+                entity.getTraceId(),
                 entity.getStatus(),
                 entity.getInputSummary(),
                 entity.getOutputSummary(),

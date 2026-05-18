@@ -1,10 +1,12 @@
 package com.agentweave.conversation.application;
 
 import com.agentweave.conversation.domain.MessageStatus;
+import com.agentweave.conversation.domain.ModelCallScenario;
 import com.agentweave.conversation.dto.CancelMessageResponse;
 import com.agentweave.conversation.dto.ConversationMessageStatusResponse;
 import com.agentweave.conversation.application.StreamTaskRegistry.StreamTask;
 import com.agentweave.conversation.dto.WorkflowStepEventResponse;
+import com.agentweave.observability.application.SseConnectionTracker;
 import com.agentweave.shared.security.CurrentUser;
 import com.agentweave.shared.security.CurrentUserService;
 import com.agentweave.shared.tracing.CorrelationContext;
@@ -27,6 +29,7 @@ public class ConversationStreamService {
     private static final String STREAM_TIMEOUT_MESSAGE = "SSE stream timed out";
     private static final String PROVIDER = "openai";
     private static final String MODEL = "unknown";
+    private static final String STREAM_ENDPOINT = "/api/v1/conversations/{conversationId}/stream";
 
     private final ConversationService conversationService;
     private final ConversationAiClient conversationAiClient;
@@ -39,6 +42,7 @@ public class ConversationStreamService {
     private final CurrentUserService currentUserService;
     private final TraceIdProvider traceIdProvider;
     private final CorrelationContext correlationContext;
+    private final SseConnectionTracker sseConnectionTracker;
 
     public ConversationStreamService(
             ConversationService conversationService,
@@ -51,7 +55,8 @@ public class ConversationStreamService {
             ChatProperties chatProperties,
             CurrentUserService currentUserService,
             TraceIdProvider traceIdProvider,
-            CorrelationContext correlationContext) {
+            CorrelationContext correlationContext,
+            SseConnectionTracker sseConnectionTracker) {
         this.conversationService = conversationService;
         this.conversationAiClient = conversationAiClient;
         this.conversationRagService = conversationRagService;
@@ -63,6 +68,7 @@ public class ConversationStreamService {
         this.currentUserService = currentUserService;
         this.traceIdProvider = traceIdProvider;
         this.correlationContext = correlationContext;
+        this.sseConnectionTracker = sseConnectionTracker;
     }
 
     public Flux<ServerSentEvent<?>> stream(UUID conversationId) {
@@ -75,35 +81,46 @@ public class ConversationStreamService {
         RagPromptContext ragContext = withCorrelation(traceId, conversationId, assistantMessageId, () ->
                 conversationRagService.retrieve(basePrompt));
         ConversationPrompt prompt = conversationService.withRagContext(basePrompt, ragContext);
+        SseConnectionTracker.SseConnectionScope connectionScope = sseConnectionTracker.start(
+                user.id(),
+                conversationId,
+                assistantMessageId,
+                traceId,
+                STREAM_ENDPOINT,
+                MODEL);
         long startedAt = System.nanoTime();
         AtomicReference<StringBuilder> answer = new AtomicReference<>(new StringBuilder());
+        AtomicReference<ConversationAiResponse> modelMetadata = new AtomicReference<>();
         AtomicBoolean terminalMessageStateUpdated = new AtomicBoolean(false);
         Flux<ServerSentEvent<?>> prefix = Flux.just(
-                withCorrelation(traceId, conversationId, assistantMessageId, () ->
-                        sseEventFactory.workflowStep(
-                                conversationId,
-                                assistantMessageId,
-                                new WorkflowStepEventResponse(
-                                        UUID.randomUUID().toString(),
-                                        "Planner",
-                                        "SUCCEEDED",
-                                traceId),
-                        traceId)));
+                trackedEvent(connectionScope, "workflow_step", () ->
+                        withCorrelation(traceId, conversationId, assistantMessageId, () ->
+                                sseEventFactory.workflowStep(
+                                        conversationId,
+                                        assistantMessageId,
+                                        new WorkflowStepEventResponse(
+                                                UUID.randomUUID().toString(),
+                                                "Planner",
+                                                "SUCCEEDED",
+                                                traceId),
+                                        traceId))));
         Flux<ServerSentEvent<?>> citations = Flux.fromIterable(ragContext.citations())
-                .map(citation -> withCorrelation(traceId, conversationId, assistantMessageId, () ->
-                        sseEventFactory.citation(
-                                conversationId,
-                                assistantMessageId,
-                                citation,
-                                traceId)));
+                .map(citation -> trackedEvent(connectionScope, "citation", () ->
+                        withCorrelation(traceId, conversationId, assistantMessageId, () ->
+                                sseEventFactory.citation(
+                                        conversationId,
+                                        assistantMessageId,
+                                        citation,
+                                        traceId))));
         Flux<ServerSentEvent<?>> graphPaths = Flux.fromIterable(ragContext.graphPaths())
-                .map(graphPath -> withCorrelation(traceId, conversationId, assistantMessageId, () ->
-                        sseEventFactory.graphPath(
-                                conversationId,
-                                assistantMessageId,
-                                graphPath,
-                                traceId)));
-        Flux<String> answerStream = Flux.defer(() -> {
+                .map(graphPath -> trackedEvent(connectionScope, "graph_path", () ->
+                        withCorrelation(traceId, conversationId, assistantMessageId, () ->
+                                sseEventFactory.graphPath(
+                                        conversationId,
+                                        assistantMessageId,
+                                        graphPath,
+                                        traceId))));
+        Flux<ConversationAiChunk> answerStream = Flux.defer(() -> {
             CorrelationContext.Scope scope = correlationContext.open(traceId, conversationId, assistantMessageId);
             try {
                 return conversationAiClient.streamAnswer(prompt)
@@ -114,13 +131,23 @@ public class ConversationStreamService {
             }
         });
         Flux<ServerSentEvent<?>> deltas = answerStream
-                .doOnNext(chunk -> answer.get().append(chunk))
-                .map(chunk -> withCorrelation(traceId, conversationId, assistantMessageId, () ->
-                        sseEventFactory.messageDelta(
-                                conversationId,
-                                assistantMessageId,
-                                chunk,
-                                traceId)));
+                .doOnNext(chunk -> {
+                    if (chunk.hasMetadata()) {
+                        modelMetadata.set(chunk.metadata());
+                        sseConnectionTracker.modelResolved(connectionScope, modelName(chunk.metadata()));
+                    }
+                    if (chunk.hasContent()) {
+                        answer.get().append(chunk.content());
+                    }
+                })
+                .filter(ConversationAiChunk::hasContent)
+                .map(chunk -> trackedEvent(connectionScope, "message_delta", () ->
+                        withCorrelation(traceId, conversationId, assistantMessageId, () ->
+                                sseEventFactory.messageDelta(
+                                        conversationId,
+                                        assistantMessageId,
+                                        chunk.content(),
+                                        traceId))));
         Flux<ServerSentEvent<?>> done = Flux.defer(() -> {
             UUID completedMessageId = withCorrelation(traceId, conversationId, assistantMessageId, () ->
                     conversationService.completePendingAssistantMessage(
@@ -130,21 +157,27 @@ public class ConversationStreamService {
                             messageMetadataService.assistantRagMetadata(ragContext)));
             terminalMessageStateUpdated.set(true);
             withCorrelation(traceId, conversationId, completedMessageId, () -> {
-                modelCallLogService.recordSuccess(
+                modelCallLogService.recordStreamSuccess(
                         conversationId,
                         completedMessageId,
                         new ConversationAiResponse(
                                 answer.get().toString(),
                                 PROVIDER,
-                                MODEL,
-                                null,
-                                null),
+                                modelName(modelMetadata.get()),
+                                promptTokens(modelMetadata.get()),
+                                completionTokens(modelMetadata.get())),
+                        promptSummary(prompt),
+                        responseSummary(answer.get().toString()),
                         elapsedMillis(startedAt),
-                        traceId);
+                        traceId,
+                        scenario(ragContext, ModelCallScenario.CHAT_STREAM));
                 return null;
             });
-            return Flux.just(withCorrelation(traceId, conversationId, completedMessageId, () ->
-                    sseEventFactory.done(conversationId, completedMessageId, traceId)));
+            ServerSentEvent<?> doneEvent = trackedEvent(connectionScope, "done", () ->
+                    withCorrelation(traceId, conversationId, completedMessageId, () ->
+                            sseEventFactory.done(conversationId, completedMessageId, traceId)));
+            sseConnectionTracker.complete(connectionScope);
+            return Flux.just(doneEvent);
         });
         Mono<StreamTermination> timeoutSignal = Mono.delay(chatProperties.streamTimeout())
                 .map(ignored -> StreamTermination.timeout(STREAM_TIMEOUT_MESSAGE));
@@ -163,20 +196,25 @@ public class ConversationStreamService {
                                 assistantMessageId,
                                 traceId,
                                 startedAt,
-                                terminalMessageStateUpdated);
+                                ragContext,
+                                terminalMessageStateUpdated,
+                                connectionScope);
                         }))
                 .concatWith(Flux.defer(() -> {
                     StreamTermination termination = terminationRef.get();
                     if (termination == null || !StreamTerminationType.TIMEOUT.equals(termination.type())) {
                         return Flux.empty();
                     }
-                    return Flux.just(withCorrelation(traceId, conversationId, assistantMessageId, () ->
-                            sseEventFactory.error(
-                                    conversationId,
-                                    assistantMessageId,
-                                    termination.code(),
-                                    termination.message(),
-                                    traceId)));
+                    ServerSentEvent<?> errorEvent = trackedEvent(connectionScope, "error", () ->
+                            withCorrelation(traceId, conversationId, assistantMessageId, () ->
+                                    sseEventFactory.error(
+                                            conversationId,
+                                            assistantMessageId,
+                                            termination.code(),
+                                            termination.message(),
+                                            traceId)));
+                    sseConnectionTracker.timeout(connectionScope, termination.message());
+                    return Flux.just(errorEvent);
                 }))
                 .onErrorResume(ex -> {
                     withCorrelation(traceId, conversationId, assistantMessageId, () -> {
@@ -185,23 +223,27 @@ public class ConversationStreamService {
                                 user.id(),
                                 STREAM_FAILURE_MESSAGE);
                         terminalMessageStateUpdated.set(true);
-                        modelCallLogService.recordFailure(
+                        modelCallLogService.recordStreamFailure(
                                 conversationId,
                                 assistantMessageId,
                                 PROVIDER,
                                 MODEL,
+                                scenario(ragContext, ModelCallScenario.CHAT_STREAM),
                                 elapsedMillis(startedAt),
                                 ex,
                                 traceId);
                         return null;
                     });
-                    return Flux.just(withCorrelation(traceId, conversationId, assistantMessageId, () ->
-                            sseEventFactory.error(
-                                    conversationId,
-                                    assistantMessageId,
-                                    "SSE_STREAM_ERROR",
-                                    STREAM_FAILURE_MESSAGE,
-                                    traceId)));
+                    ServerSentEvent<?> errorEvent = trackedEvent(connectionScope, "error", () ->
+                            withCorrelation(traceId, conversationId, assistantMessageId, () ->
+                                    sseEventFactory.error(
+                                            conversationId,
+                                            assistantMessageId,
+                                            "SSE_STREAM_ERROR",
+                                            STREAM_FAILURE_MESSAGE,
+                                            traceId)));
+                    sseConnectionTracker.fail(connectionScope, errorSummary(ex));
+                    return Flux.just(errorEvent);
                 })
                 .doFinally(signalType -> {
                     if (SignalType.CANCEL.equals(signalType)
@@ -212,8 +254,18 @@ public class ConversationStreamService {
                                     user.id(),
                                     assistantMessageId,
                                     STREAM_CANCELLED_MESSAGE);
+                            modelCallLogService.recordStreamCancelled(
+                                    conversationId,
+                                    assistantMessageId,
+                                    PROVIDER,
+                                    MODEL,
+                                    scenario(ragContext, ModelCallScenario.CHAT_STREAM),
+                                    elapsedMillis(startedAt),
+                                    STREAM_CANCELLED_MESSAGE,
+                                    traceId);
                             return null;
                         });
+                        sseConnectionTracker.clientDisconnected(connectionScope);
                     }
                     streamTaskRegistry.remove(streamTask);
                 });
@@ -246,7 +298,9 @@ public class ConversationStreamService {
             UUID assistantMessageId,
             String traceId,
             long startedAt,
-            AtomicBoolean terminalMessageStateUpdated) {
+            RagPromptContext ragContext,
+            AtomicBoolean terminalMessageStateUpdated,
+            SseConnectionTracker.SseConnectionScope connectionScope) {
         if (!terminalMessageStateUpdated.compareAndSet(false, true)) {
             return;
         }
@@ -258,11 +312,12 @@ public class ConversationStreamService {
                         assistantMessageId,
                         termination.code(),
                         termination.message());
-                modelCallLogService.recordFailure(
+                modelCallLogService.recordStreamTimeout(
                         conversationId,
                         assistantMessageId,
                         PROVIDER,
                         MODEL,
+                        scenario(ragContext, ModelCallScenario.CHAT_STREAM),
                         elapsedMillis(startedAt),
                         new StreamTimeoutException(termination.message()),
                         traceId);
@@ -272,6 +327,16 @@ public class ConversationStreamService {
                         userId,
                         assistantMessageId,
                         termination.message());
+                modelCallLogService.recordStreamCancelled(
+                        conversationId,
+                        assistantMessageId,
+                        PROVIDER,
+                        MODEL,
+                        scenario(ragContext, ModelCallScenario.CHAT_STREAM),
+                        elapsedMillis(startedAt),
+                        termination.message(),
+                        traceId);
+                sseConnectionTracker.cancel(connectionScope, termination.message());
             }
             return null;
         });
@@ -281,10 +346,66 @@ public class ConversationStreamService {
         return Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
     }
 
+    private ModelCallScenario scenario(RagPromptContext ragContext, ModelCallScenario fallback) {
+        if (ragContext != null && (ragContext.hasCitations() || ragContext.hasGraphPaths())) {
+            return ModelCallScenario.RAG_ANSWER;
+        }
+        return fallback;
+    }
+
+    private String promptSummary(ConversationPrompt prompt) {
+        RagPromptContext ragContext = prompt.ragContext();
+        int citations = ragContext == null ? 0 : ragContext.citations().size();
+        int graphPaths = ragContext == null ? 0 : ragContext.graphPaths().size();
+        String retrievalMode = ragContext == null ? "UNKNOWN" : ragContext.retrievalMode();
+        int messageLength = prompt.latestUserMessage() == null ? 0 : prompt.latestUserMessage().length();
+        return "conversationId=" + prompt.conversationId()
+                + ";messageLength=" + messageLength
+                + ";retrievalMode=" + retrievalMode
+                + ";citations=" + citations
+                + ";graphPaths=" + graphPaths;
+    }
+
+    private String responseSummary(String content) {
+        return "contentLength=" + (content == null ? 0 : content.length());
+    }
+
+    private String errorSummary(Throwable ex) {
+        if (ex == null) {
+            return STREAM_FAILURE_MESSAGE;
+        }
+        String message = ex.getMessage();
+        return message == null || message.isBlank() ? ex.getClass().getSimpleName() : message;
+    }
+
+    private String modelName(ConversationAiResponse response) {
+        if (response == null || response.model() == null || response.model().isBlank()) {
+            return MODEL;
+        }
+        return response.model();
+    }
+
+    private Integer promptTokens(ConversationAiResponse response) {
+        return response == null ? null : response.promptTokens();
+    }
+
+    private Integer completionTokens(ConversationAiResponse response) {
+        return response == null ? null : response.completionTokens();
+    }
+
     private <T> T withCorrelation(String traceId, UUID conversationId, UUID messageId, CorrelatedAction<T> action) {
         try (CorrelationContext.Scope ignored = correlationContext.open(traceId, conversationId, messageId)) {
             return action.execute();
         }
+    }
+
+    private ServerSentEvent<?> trackedEvent(
+            SseConnectionTracker.SseConnectionScope connectionScope,
+            String eventType,
+            CorrelatedAction<ServerSentEvent<?>> action) {
+        ServerSentEvent<?> event = action.execute();
+        sseConnectionTracker.recordEvent(connectionScope, eventType);
+        return event;
     }
 
     @FunctionalInterface

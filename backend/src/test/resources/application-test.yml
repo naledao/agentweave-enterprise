@@ -2,7 +2,15 @@ spring:
   datasource:
     url: ${AGENTWEAVE_DATASOURCE_URL:jdbc:postgresql://14.103.202.40:5432/agentweave}
     username: ${AGENTWEAVE_DATASOURCE_USERNAME:agentweave}
-    password: ${AGENTWEAVE_DATASOURCE_PASSWORD}
+    password: ${AGENTWEAVE_DATASOURCE_PASSWORD:agentweave}
+  data:
+    redis:
+      repositories:
+        enabled: false
+      host: ${AGENTWEAVE_REDIS_HOST:14.103.202.40}
+      port: ${AGENTWEAVE_REDIS_PORT:6379}
+      password: ${AGENTWEAVE_REDIS_PASSWORD:}
+      timeout: 2s
   rabbitmq:
     listener:
       simple:

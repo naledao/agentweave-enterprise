@@ -14,10 +14,15 @@ describe('ToolInvocationDetailDrawer', () => {
         invocation: {
           id: crypto.randomUUID(),
           toolCode: 'endpoint.status',
+          toolName: '接口状态查询',
+          toolType: 'ENDPOINT_STATUS',
+          riskLevel: 'LOW',
           userId: crypto.randomUUID(),
           username: 'ops-user',
           conversationId: 'conversation-1',
           messageId: 'message-1',
+          workflowRunId: 'workflow-run-1',
+          workflowStepId: 'workflow-step-1',
           inputSummary: '{"service":"payment"}',
           resultSummary: '{"status":"UP"}',
           status: 'success',
@@ -31,10 +36,15 @@ describe('ToolInvocationDetailDrawer', () => {
     })
 
     expect(await screen.findByText('endpoint.status')).toBeInTheDocument()
+    expect(screen.getByText('接口状态查询')).toBeInTheDocument()
+    expect(screen.getByText('接口状态')).toBeInTheDocument()
+    expect(screen.getByText('低风险')).toBeInTheDocument()
     expect(screen.getByText('ops-user')).toBeInTheDocument()
     expect(screen.getByText('成功')).toBeInTheDocument()
     expect(screen.getByText('{"service":"payment"}')).toBeInTheDocument()
     expect(screen.getByText('{"status":"UP"}')).toBeInTheDocument()
+    expect(screen.getByText('workflow-run-1')).toBeInTheDocument()
+    expect(screen.getByText('workflow-step-1')).toBeInTheDocument()
     expect(screen.getByText('trace-detail')).toBeInTheDocument()
   })
 

@@ -16,6 +16,8 @@ const tag = computed(() => {
   const map: Record<WorkflowStepStatus, { label: string; type: 'info' | 'success' | 'warning' | 'danger' }> = {
     PENDING: { label: stepStatusLabel('PENDING'), type: 'info' },
     RUNNING: { label: stepStatusLabel('RUNNING'), type: 'warning' },
+    WAITING_APPROVAL: { label: stepStatusLabel('WAITING_APPROVAL'), type: 'warning' },
+    RETRYING: { label: stepStatusLabel('RETRYING'), type: 'warning' },
     SUCCEEDED: { label: stepStatusLabel('SUCCEEDED'), type: 'success' },
     FAILED: { label: stepStatusLabel('FAILED'), type: 'danger' },
     SKIPPED: { label: stepStatusLabel('SKIPPED'), type: 'info' },

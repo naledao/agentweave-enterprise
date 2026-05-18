@@ -23,7 +23,7 @@ export function reduceStreamEvent(state: ChatStreamState, event: ChatStreamEvent
     ? { ...state, seenEventIds: [...state.seenEventIds, event.eventId] }
     : state
 
-  if (nextState.status === 'completed' && event.type !== 'error') {
+  if (['completed', 'cancelled'].includes(nextState.status) && event.type !== 'error') {
     return nextState
   }
 

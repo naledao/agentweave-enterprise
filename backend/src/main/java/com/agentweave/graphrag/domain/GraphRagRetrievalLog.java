@@ -1,10 +1,13 @@
 package com.agentweave.graphrag.domain;
 
+import com.agentweave.conversation.domain.ConversationEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -28,8 +31,18 @@ public class GraphRagRetrievalLog {
     @Column(name = "conversation_id")
     private UUID conversationId;
 
+    @ManyToOne
+    @JoinColumn(name = "conversation_id", insertable = false, updatable = false)
+    private ConversationEntity conversation;
+
     @Column(name = "message_id")
     private UUID messageId;
+
+    @Column(name = "workflow_run_id")
+    private UUID workflowRunId;
+
+    @Column(name = "workflow_step_id")
+    private UUID workflowStepId;
 
     @Column(name = "query", nullable = false, columnDefinition = "TEXT")
     private String query;
@@ -69,6 +82,9 @@ public class GraphRagRetrievalLog {
     @Column(name = "confidence_summary", length = 1000)
     private String confidenceSummary;
 
+    @Column(name = "duration_ms", nullable = false)
+    private long durationMs;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 40)
     private GraphRagRetrievalStatus status;
@@ -97,6 +113,8 @@ public class GraphRagRetrievalLog {
             UUID id,
             UUID conversationId,
             UUID messageId,
+            UUID workflowRunId,
+            UUID workflowStepId,
             String traceId,
             String query,
             String retrievalMode,
@@ -109,6 +127,8 @@ public class GraphRagRetrievalLog {
         this.id = id;
         this.conversationId = conversationId;
         this.messageId = messageId;
+        this.workflowRunId = workflowRunId;
+        this.workflowStepId = workflowStepId;
         this.traceId = traceId;
         this.query = query;
         this.retrievalMode = retrievalMode;
@@ -121,6 +141,7 @@ public class GraphRagRetrievalLog {
         this.status = GraphRagRetrievalStatus.PROCESSING;
         this.matchedPathCount = 0;
         this.filteredPathCount = 0;
+        this.durationMs = 0;
         this.startedAt = Instant.now();
     }
 
@@ -138,6 +159,14 @@ public class GraphRagRetrievalLog {
 
     public UUID getMessageId() {
         return messageId;
+    }
+
+    public UUID getWorkflowRunId() {
+        return workflowRunId;
+    }
+
+    public UUID getWorkflowStepId() {
+        return workflowStepId;
     }
 
     public String getQuery() {
@@ -188,6 +217,10 @@ public class GraphRagRetrievalLog {
         return confidenceSummary;
     }
 
+    public long getDurationMs() {
+        return durationMs;
+    }
+
     public GraphRagRetrievalStatus getStatus() {
         return status;
     }
@@ -218,19 +251,30 @@ public class GraphRagRetrievalLog {
             List<String> resolvedEntities,
             List<String> sourceChunkIds,
             String confidenceSummary) {
-        this.status = GraphRagRetrievalStatus.COMPLETED;
+        this.status = GraphRagRetrievalStatus.SUCCESS;
         this.matchedPathCount = matchedPathCount;
         this.filteredPathCount = filteredPathCount;
         this.resolvedEntities = resolvedEntities == null ? new ArrayList<>() : new ArrayList<>(resolvedEntities);
         this.sourceChunkIds = sourceChunkIds == null ? new ArrayList<>() : new ArrayList<>(sourceChunkIds);
         this.confidenceSummary = confidenceSummary;
         this.errorMessage = null;
-        this.completedAt = Instant.now();
+        complete();
     }
 
     public void markFailed(String errorMessage) {
         this.status = GraphRagRetrievalStatus.FAILED;
         this.errorMessage = errorMessage;
+        complete();
+    }
+
+    public void markDegraded(String errorMessage) {
+        this.status = GraphRagRetrievalStatus.DEGRADED;
+        this.errorMessage = errorMessage;
+        complete();
+    }
+
+    private void complete() {
         this.completedAt = Instant.now();
+        this.durationMs = Math.max(0, completedAt.toEpochMilli() - startedAt.toEpochMilli());
     }
 }

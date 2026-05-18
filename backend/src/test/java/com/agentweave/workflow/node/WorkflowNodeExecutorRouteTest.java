@@ -1,20 +1,25 @@
 package com.agentweave.workflow.node;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.agentweave.conversation.application.ConversationRagService;
+import com.agentweave.conversation.application.ModelCallLogService;
+import com.agentweave.langchain4j.agent.AgentModelObservation;
 import com.agentweave.langchain4j.agent.AgentPromptTemplateService;
 import com.agentweave.langchain4j.agent.ExecutorAgent;
 import com.agentweave.langchain4j.agent.PlannerAgent;
 import com.agentweave.langchain4j.agent.ReviewerAgent;
+import com.agentweave.shared.tracing.CorrelationContext;
 import com.agentweave.tool.application.ToolDefinitionService;
 import com.agentweave.tool.application.ToolRiskEvaluator;
-import com.agentweave.workflow.application.WorkflowApprovalService;
 import com.agentweave.workflow.application.AgentStepService;
 import com.agentweave.workflow.application.PlanValidator;
+import com.agentweave.workflow.application.WorkflowApprovalService;
 import com.agentweave.workflow.application.WorkflowCheckpointService;
 import com.agentweave.workflow.application.WorkflowRunService;
+import com.agentweave.workflow.application.WorkflowToolExecutionService;
 import com.agentweave.workflow.domain.AgentStepType;
 import com.agentweave.workflow.dto.WorkflowPlan;
 import com.agentweave.workflow.dto.WorkflowPlanStep;
@@ -44,7 +49,12 @@ class WorkflowNodeExecutorRouteTest {
             checkpointService,
             mock(ToolDefinitionService.class),
             toolRiskEvaluator,
-            mock(WorkflowApprovalService.class));
+            mock(WorkflowApprovalService.class),
+            mock(WorkflowToolExecutionService.class),
+            mock(ModelCallLogService.class),
+            mock(AgentModelObservation.class),
+            new CorrelationContext(),
+            "mimo-v2.5");
 
     @Test
     @DisplayName("should route high-risk tool step to human approval")
